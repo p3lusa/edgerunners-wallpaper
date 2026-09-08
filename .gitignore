@@ -1,0 +1,5 @@
+# Basura de SO / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
