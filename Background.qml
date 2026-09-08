@@ -4,6 +4,7 @@ import Quickshell.Wayland
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Shapes
+import QtMultimedia
 import qs.Commons
 import qs.Ui
 
@@ -13,6 +14,14 @@ Item {
   readonly property string home: Quickshell.env("HOME")
   readonly property string stateHome: home + "/.local/state"
   readonly property string currentBackgroundLink: stateHome + "/omarchy/current/background"
+  readonly property string currentThemeLink: stateHome + "/omarchy/current/theme"
+
+  // Video wallpaper (Route A, additive): the active theme may ship a videos/
+  // directory. When it does, each panel plays that clip (looped, video-only
+  // assets carry no audio track) on top of the image fallback. When the theme
+  // has no video, this stays "" and the plugin behaves exactly like the stock
+  // omarchy.background image renderer.
+  property string videoPath: ""
 
   property string currentBackground: ""
   property string displayedBackground: ""
@@ -32,9 +41,21 @@ Item {
 
   function refreshBackground() {
     if (!readlinkProc.running) readlinkProc.running = true
+    refreshVideo()
+  }
+
+  function refreshVideo() {
+    if (!themeVideoProc.running) themeVideoProc.running = true
+  }
+
+  function setVideoPath(path) {
+    path = String(path || "").trim()
+    if (path === videoPath) return
+    videoPath = path
   }
 
   function setBackground(path, instant) {
+    refreshVideo()
     transitionBackground("", path, path, instant, false)
   }
 
@@ -42,6 +63,7 @@ Item {
     path = String(path || "").trim()
     finalPath = String(finalPath || path).trim()
     fromPath = String(fromPath || "").trim()
+    refreshVideo()
     if (!path || (!force && finalPath === currentBackground)) return
     currentBackground = finalPath
     backgroundVersion += 1
@@ -125,6 +147,18 @@ Item {
     command: ["readlink", "-f", root.currentBackgroundLink]
     stdout: StdioCollector {
       onStreamFinished: root.setBackground(String(text || "").trim(), false)
+    }
+  }
+
+  // Resolve the active theme's looping video, if any.
+  // `omarchy theme set` / `theme bg next` also update the theme symlink, and
+  // both paths funnel through setBackground/transitionBackground (IPC + poll),
+  // so re-resolving there keeps the video in sync with the active theme.
+  Process {
+    id: themeVideoProc
+    command: ["bash", "-c", "theme=$(readlink -f " + root.currentThemeLink + "); [[ -d $theme/videos ]] && ls $theme/videos/*.mp4 2>/dev/null | sort | head -n1"]
+    stdout: StdioCollector {
+      onStreamFinished: root.setVideoPath(String(text || ""))
     }
   }
 
@@ -232,6 +266,34 @@ Item {
             root.finishingTransition = false
           }
         }
+      }
+
+      // One player per panel (multi-monitor): each screen decodes its own
+      // copy. On the reference hardware (AMD 780M, H.264 1080p) that is a few
+      // percent of one core. The image `base` underneath is always kept
+      // current, so a missing/corrupt/unloadable video degrades to the image
+      // instead of a black screen.
+      MediaPlayer {
+        id: videoPlayer
+        source: root.videoPath !== "" ? root.imageUrl(root.videoPath) : ""
+        autoPlay: true
+        loops: -1 // infinite
+        onPlaybackStateChanged: function() {
+          if (playbackState === MediaPlayer.PlayingState)
+            console.log("[p3lu.video-background] playing " + root.videoPath + " on " + modelData.name)
+        }
+        onErrorOccurred: function(error, errorString) {
+          if (root.videoPath !== "")
+            console.warn("[p3lu.video-background] video error on " + modelData.name + ": " + errorString)
+        }
+      }
+
+      VideoOutput {
+        id: videoOut
+        anchors.fill: parent
+        fillMode: Qt.KeepAspectRatioByExpanding
+        visible: root.videoPath !== "" && videoPlayer.playbackState === MediaPlayer.PlayingState
+        Component.onCompleted: videoPlayer.videoOutput = videoOut
       }
 
       Image {
