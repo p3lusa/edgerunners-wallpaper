@@ -15,6 +15,10 @@ infinito** sobre la capa de fondo.
     decode → se ve la imagen, nunca pantalla negra.
   - Se re-resuelve el video en cada cambio de fondo/tema (IPC + poll), así
     `omarchy theme set` y `omarchy theme bg next` lo mantienen en sync.
+- **v0.3.0** — ciclo de videos:
+  - El tema puede llevar **varios** `videos/*.mp4`; `omarchy theme bg next`
+    / `bg set` avanza al siguiente clip (ciclo), `omarchy theme set` vuelve
+    al primero.
 
 ## Instalar (comandos internos de Omarchy)
 ```bash
