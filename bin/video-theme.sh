@@ -34,6 +34,8 @@ set -euo pipefail
 # Self-deploy the video keybindings (idempotent, silent; no-op when already
 # present, so no Hyprland reload storms).
 "$(dirname "${BASH_SOURCE[0]}")/video-bindings.sh" --add --quiet || true
+# Reap abandoned per-clip themes (silent no-op when nothing to clean).
+"$(dirname "${BASH_SOURCE[0]}")/video-cleanup.sh" || true
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   echo "Usage: $(basename "$0") <clip.mp4> [theme-name]" >&2
@@ -109,6 +111,9 @@ fi
 mkdir -p "$theme_src"
 cp -r "$gen_dir/." "$theme_src/"
 echo "aether" > "${theme_src}/.aether-managed"
+# Plugin marker: video-cleanup.sh only ever touches themes that carry it
+# (never the multi-clip library theme or normal themes).
+printf 'clip=%s\ncreated=%s\n' "$(basename "$clip")" "$(date -Is)" > "${theme_src}/.video-theme"
 
 # --- 3. attach the video -----------------------------------------------------------
 # The video plugin derives the playing clip from the active background image's

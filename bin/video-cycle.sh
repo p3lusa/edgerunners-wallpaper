@@ -22,6 +22,8 @@ set -euo pipefail
 # Self-deploy the video keybindings (idempotent, silent; no-op when already
 # present, so no Hyprland reload storms).
 "$(dirname "${BASH_SOURCE[0]}")/video-bindings.sh" --add --quiet || true
+# Reap abandoned per-clip themes (silent no-op when nothing to clean).
+"$(dirname "${BASH_SOURCE[0]}")/video-cleanup.sh" || true
 
 if [[ $# -ne 1 || ( "$1" != "next" && "$1" != "prev" ) ]]; then
   echo "Usage: $(basename "$0") <next|prev>" >&2

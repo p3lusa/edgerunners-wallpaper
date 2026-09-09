@@ -27,6 +27,8 @@ PLUGIN_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Self-deploy the keybindings (idempotent, silent, no reload if unchanged).
 "$PLUGIN_BIN/video-bindings.sh" --add --quiet || true
+# Reap abandoned per-clip themes (silent no-op when nothing to clean).
+"$PLUGIN_BIN/video-cleanup.sh" || true
 
 USER_THEMES="$HOME/.config/omarchy/themes"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/video-switcher"
