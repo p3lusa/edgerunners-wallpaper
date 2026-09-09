@@ -22,6 +22,7 @@ SOFTWARE.
 
 NOTA DE MEDIA
 -------------
-Los archivos de video en `videos/` son material de terceros (Cyberpunk 2077 /
-Edgerunners — CD Projekt Red / Aniplex / Trigger) incluido solo para uso
-personal. NO están cubiertos por esta licencia MIT y NO deben redistribuirse.
+Este plugin no distribuye vídeo: reproduce los archivos del directorio
+`videos/` del tema activo. Los clips que pongas ahí para uso personal son
+responsabilidad tuya; este repo no distribuye material derivado de terceros
+(series, películas, etc.) y ese material no está cubierto por esta licencia.

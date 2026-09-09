@@ -1,7 +1,7 @@
 #!/bin/bash
 # Re-assert the video-wallpaper plugin state after `omarchy update`.
 #
-# Desired state while the edgerunners theme is active:
+# Desired state while the video-wallpaper theme is active:
 #   p3lu.video-background enabled, omarchy.background disabled.
 # No-op when the theme or plugin is absent, when another theme is active,
 # or when the state already matches — so it never fights a deliberate
@@ -9,15 +9,15 @@
 
 set -euo pipefail
 
-THEME_DIR="$HOME/.config/omarchy/themes/edgerunners"
+THEME_DIR="$HOME/.config/omarchy/themes/video-wallpaper"
 PLUGIN_DIR="$HOME/.config/omarchy/plugins/p3lu.video-background"
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
 THEME_NAME_FILE="$HOME/.local/state/omarchy/current/theme.name"
 
 [[ -d $THEME_DIR && -d $PLUGIN_DIR && -f $SHELL_JSON ]] || exit 0
 
-# Only re-assert while the edgerunners theme is the active one.
-[[ "$(cat "$THEME_NAME_FILE" 2>/dev/null || true)" == "edgerunners" ]] || exit 0
+# Only re-assert while the video-wallpaper theme is the active one.
+[[ "$(cat "$THEME_NAME_FILE" 2>/dev/null || true)" == "video-wallpaper" ]] || exit 0
 
 video_on=$(jq -r '[.plugins[]?.id // empty] | index("p3lu.video-background")' "$SHELL_JSON" 2>/dev/null || echo null)
 stock_off=$(jq -r '.disabledPlugins[]? | select(. == "omarchy.background")' "$SHELL_JSON" 2>/dev/null || echo "")

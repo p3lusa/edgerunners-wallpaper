@@ -50,7 +50,7 @@ omarchy plugin enable omarchy.background    # restaura el render de imagen stock
   ```
   El hook `hooks/post-update` (instalarlo con
   `omarchy hook install post-update <script>`) re-asegura el estado tras
-  `omarchy update` cuando el tema activo es `edgerunners`.
+  `omarchy update` cuando el tema activo es `video-wallpaper`.
 
 ## Créditos y licencia
 - **MIT** (ver [`LICENSE`](LICENSE)).
