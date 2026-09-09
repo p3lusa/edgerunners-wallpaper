@@ -93,8 +93,17 @@ cp -r "$gen_dir/." "$theme_src/"
 echo "aether" > "${theme_src}/.aether-managed"
 
 # --- 3. attach the video -----------------------------------------------------------
+# The video plugin derives the playing clip from the active background image's
+# base name, so the poster must carry the clip's base name. Rename whatever
+# poster Aether generated to match.
+clip_base="$(basename "$clip")"
+clip_base="${clip_base%.*}"
 mkdir -p "${theme_src}/videos"
 cp "$clip" "${theme_src}/videos/$(basename "$clip")"
+poster_file="$(find "${theme_src}/backgrounds" -maxdepth 1 -name '*.png' 2>/dev/null | head -1)"
+if [[ -n "$poster_file" ]]; then
+  mv "$poster_file" "${theme_src}/backgrounds/${clip_base}.png"
+fi
 
 # --- 4. activate ---------------------------------------------------------------------
 if ! omarchy theme set "$name"; then

@@ -183,6 +183,19 @@ Item {
     }
   }
 
+  // The background symlink is the source of truth. IPC can be dropped
+  // (e.g. a burst of `bg next`), and themes can gain/lose videos at runtime,
+  // so poll the symlink on a 2s cadence and re-resolve. A re-set of the
+  // current path early-returns (no transition), so an unchanged desktop costs
+  // one cheap readlink per tick.
+  Timer {
+    id: backgroundPollTimer
+    interval: 2000
+    repeat: true
+    running: true
+    onTriggered: { if (!readlinkProc.running) readlinkProc.running = true }
+  }
+
   // Resolve the active theme's videos/*.mp4 and build the base-name map.
   // `omarchy theme set` / `theme bg next` also update the theme symlink, and
   // both paths funnel through setBackground/transitionBackground (IPC + poll),
