@@ -11,6 +11,7 @@ Desktop wallpaper renderer for [Omarchy](https://omarchy.org). Drop `videos/*.mp
 - The video always matches the background: the clip is derived from the active background image (paired by file name), so cycling with `omarchy theme bg next` advances both in lockstep and they can never desync. The active clip also survives shell restarts for free (the background symlink is Omarchy's own persisted state).
 - Drop-in replacement for the built-in `omarchy.background` service: same layer, same namespace, same IPC surface (`themeTransition`, background symlink tracking, transitions).
 - Self-installing keybindings (video switcher carousel + prev/next) that only appear when you use a video tool, and are fully removable.
+- `video-manage`: a gum-based terminal UI (themed by the active palette) to browse, play, add, and remove clips — with `video-add.sh` / `video-remove.sh` for the same operations from plain bash.
 
 ## Requirements
 
@@ -60,7 +61,24 @@ Prerequisites: `aether` in `PATH`, `ffmpeg`/`ffprobe`, and this plugin enabled (
 
 ## Usage
 
-There are two workflows, and they can be mixed:
+### Library manager (TUI)
+
+`video-manage.sh` is a terminal UI (built on `gum`, styled by the active
+theme's palette) that does the whole job: browse the library with live
+status, play any clip (video + palette), add a new clip through a native
+file picker, and remove one with a confirmation prompt.
+
+```bash
+video-manage
+```
+
+Every operation is also available non-interactively:
+
+| Command | What it does |
+|---|---|
+| `video-add.sh <clip>` | Adds a clip: validates it (no audio track; non-`.mp4` containers are losslessly remuxed), creates the per-clip theme via Aether (own palette), registers it in the cycle list, and mirrors it into the library theme (`video-wallpaper`, hardlinks — zero extra space). `--strip-audio` drops an audio track first (lossless). |
+| `video-remove.sh <name>` | Removes a clip from everywhere: its per-clip theme, every library copy (clip + poster), and the cycle-list entry. If the clip is the playing one it switches to another video theme first, and re-points the background if it would dangle. It never touches your original clip file. Accepts `07-rebecca-gun`, `video-07-rebecca-gun`, or with `.mp4`. |
+| `video-theme.sh <clip>` | The original Aether helper: per-clip theme only (no library mirror). |
 
 ### One theme, many clips (one palette)
 
