@@ -53,8 +53,8 @@ strip_block() {
 block_content() {
   cat <<EOF
 o.bind("SUPER + CTRL + ALT + SPACE", "Video switcher", "$PLUGIN_BIN/video-switcher.sh")
-o.bind("SUPER + SHIFT + CTRL + LEFT", "Previous video", "$PLUGIN_BIN/video-prev.sh")
-o.bind("SUPER + SHIFT + CTRL + RIGHT", "Next video", "$PLUGIN_BIN/video-next.sh")
+o.bind("SUPER + CTRL + ALT + LEFT", "Previous video", "$PLUGIN_BIN/video-prev.sh")
+o.bind("SUPER + CTRL + ALT + RIGHT", "Next video", "$PLUGIN_BIN/video-next.sh")
 EOF
 }
 

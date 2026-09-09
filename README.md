@@ -106,9 +106,9 @@ plugin moves):
 
 | Key | Action |
 |---|---|
-| `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of your video themes with poster previews (same UI as the wallpaper selector); selecting one switches video + palette |
-| `Super+Shift+Ctrl+Left` | Previous video theme |
-| `Super+Shift+Ctrl+Right` | Next video theme |
+| `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of all your videos with poster previews (same UI as the wallpaper selector): the current theme's clips, plus your per-clip video themes. Selecting a clip switches the video within the current theme (same palette); selecting a video theme switches video + palette |
+| `Super+Ctrl+Alt+Left` | Previous video theme |
+| `Super+Ctrl+Alt+Right` | Next video theme |
 
 They are installed on use rather than at plugin install: a plugin install
 hook does not exist in Omarchy, and the plugin should not claim your
@@ -119,9 +119,13 @@ keymap until you actually use the feature. To install them manually:
 #### The video switcher
 
 `video-switcher.sh` is a thin wrapper around Omarchy's image menu (the same
-UI as the wallpaper switcher): it builds a poster carousel from the cycle
-list (or from every `video-*` theme when there is no list), preselects the
-current one, and runs `omarchy theme set` on the chosen poster.
+UI as the wallpaper switcher). It builds a poster carousel with two kinds of
+entries: the active theme's own clips (each background with a paired video in
+`videos/`), and the per-clip video themes (the cycle list maintained by
+`video-theme.sh`, falling back to every `video-*` theme). The current video is
+preselected. Choosing a clip runs `omarchy theme bg set` (video changes,
+palette stays); choosing a video theme runs `omarchy theme set` (video and
+palette change together).
 
 ### No videos at all
 
