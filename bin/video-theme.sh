@@ -6,11 +6,16 @@
 # the clip is installed as the theme's looping video wallpaper.
 #
 # Usage:
-#   video-theme.sh <clip.mp4> <theme-name>
+#   video-theme.sh <clip.mp4> [theme-name]
 #
 # Example:
-#   video-theme.sh ~/Videos/aurora.mp4 my-aurora
-#   omarchy theme set my-aurora   # (already done by the script)
+#   video-theme.sh ~/Videos/aurora.mp4            # theme "video-aurora"
+#   video-theme.sh ~/Videos/aurora.mp4 my-aurora  # theme "my-aurora"
+#
+# The theme is activated immediately, and (because each clip gets its own
+# theme) registered in the video-theme cycle: `video-next` / `video-prev`
+# (installed alongside this helper) switch to the next/previous clip+palette
+# pair with one command.
 #
 # Requirements: aether, ffmpeg, omarchy, and the p3lu.video-background
 # plugin (to render the videos/ directory — without it, the theme shows
@@ -26,22 +31,16 @@
 
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "Usage: $(basename "$0") <clip.mp4> <theme-name>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "Usage: $(basename "$0") <clip.mp4> [theme-name]" >&2
   exit 2
 fi
 
 clip="$1"
-name="$2"
 
 # --- sanity checks ------------------------------------------------------------
 if [[ ! -f "$clip" ]]; then
   echo "error: clip not found: $clip" >&2
-  exit 1
-fi
-if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
-  echo "error: invalid theme name: $name" >&2
-  echo "       (letters, digits, '_', '.', '-'; must start with a letter/digit)" >&2
   exit 1
 fi
 for tool in aether ffmpeg ffprobe omarchy; do
@@ -51,7 +50,22 @@ for tool in aether ffmpeg ffprobe omarchy; do
   fi
 done
 
-name="$(tr '[:upper:]' '[:lower:]' <<< "$name")"
+# Theme name: explicit, or derived from the clip (video-<clip base>).
+# Valid theme names: [A-Za-z0-9][A-Za-z0-9_.-]{0,63}.
+clip_base="$(basename "$clip")"
+clip_base="${clip_base%.*}"
+if [[ $# -eq 2 ]]; then
+  name="$(tr '[:upper:]' '[:lower:]' <<< "$2")"
+else
+  # sanitize: lowercase, keep [a-z0-9_.-], anything else -> '-', trim edges.
+  s="$(tr '[:upper:]' '[:lower:]' <<< "$clip_base" | tr -c 'a-z0-9_.-' '-' | tr -d '\n' | sed -e 's/^-*//' -e 's/-*$//')"
+  name="video-${s:0:58}"
+fi
+if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$ ]]; then
+  echo "error: invalid theme name: $name" >&2
+  echo "       (letters, digits, '_', '.', '-'; must start with a letter/digit)" >&2
+  exit 1
+fi
 theme_src="${HOME}/.config/omarchy/themes/${name}"
 if [[ -d "$theme_src" ]]; then
   echo "error: theme already exists: $name ($theme_src)" >&2
@@ -111,8 +125,16 @@ if ! omarchy theme set "$name"; then
   exit 1
 fi
 
+# --- 5. register in the video-theme cycle ----------------------------------------
+# One theme per clip means "change video" == "change theme". The cycle is an
+# explicit ordered list (creation order); video-next / video-prev walk it.
+cycle_list="${HOME}/.config/omarchy/video-themes"
+if ! grep -qxF "$name" "$cycle_list" 2>/dev/null; then
+  echo "$name" >> "$cycle_list"
+fi
+
 echo
 echo "Theme '$name' is active."
 echo "  source: $theme_src"
 echo "  video : videos/$(basename "$clip")"
-echo "  switch back: omarchy theme set <previous-theme>"
+echo "  cycle : video-next / video-prev (registered in $cycle_list)"

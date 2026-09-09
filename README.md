@@ -50,14 +50,18 @@ The first command installs and enables the plugin; the second hands the backgrou
 This plugin ships a helper, `bin/video-theme.sh` (installed at `~/.config/omarchy/plugins/p3lu.video-background/bin/video-theme.sh`), that turns any clip into a complete, palette-matched Omarchy theme in one command:
 
 ```bash
-video-theme.sh <clip.mp4> <theme-name>
+video-theme.sh <clip.mp4> [theme-name]   # default name: video-<clip base>
 ```
 
 It extracts a poster frame from the clip, runs [Aether](https://github.com/omacom/aether) to derive the color palette and generate the full theme (terminal, bar, lock screen, …), installs it to `~/.config/omarchy/themes/<theme-name>/` with the clip in its `videos/` directory, and activates it. Result: video wallpaper and every accent color on the system come from the same clip.
 
-Prerequisites: `aether` in `PATH`, `ffmpeg`/`ffprobe`, and this plugin enabled (without it the theme shows the poster image instead of the video). To update the clip later, replace the file in the theme's `videos/` directory and run `omarchy theme set <theme-name>`.
+Prerequisites: `aether` in `PATH`, `ffmpeg`/`ffprobe`, and this plugin enabled (without it the theme shows the poster image instead of the video). Each created theme is registered in the cycle list, so `video-next` / `video-prev` can walk them (see Usage). To update the clip later, replace the file in the theme's `videos/` directory and run `omarchy theme set <theme-name>`.
 
 ## Usage
+
+There are two workflows, and they can be mixed:
+
+### One theme, many clips (one palette)
 
 1. Put clips in the theme's source `videos/` directory — for an
    `omarchy theme install`ed theme that is
@@ -65,6 +69,33 @@ Prerequisites: `aether` in `PATH`, `ffmpeg`/`ffprobe`, and this plugin enabled (
 2. Switch to that theme: `omarchy theme set <theme>` (this re-stages the
    theme, including your clips).
 3. Cycle clips: `omarchy theme bg next`.
+
+All clips share the theme's palette.
+
+### One theme per clip (each clip gets its own palette)
+
+Clips usually don't share a mood, and a palette derived from clip A looks
+wrong over clip B. The Aether helper solves this: each clip becomes its own
+complete theme (see the Aether section above), and the plugin ships cycle
+commands to walk them:
+
+```bash
+video-theme.sh ~/Videos/aurora.mp4      # creates + activates theme "video-aurora"
+video-theme.sh ~/Videos/rain.mp4        # creates + activates theme "video-rain"
+video-next                              # -> next clip + palette (wraps around)
+video-prev                              # -> previous clip + palette
+```
+
+`video-next` / `video-prev` are installed at
+`~/.config/omarchy/plugins/p3lu.video-background/bin/` (bind them in your
+keymap, or prepend that directory to `PATH`). Each run is an
+`omarchy theme set` to the next theme in the ordered cycle list
+(`~/.config/omarchy/video-themes`, maintained by the helper): the palette,
+background, and video all switch together with the usual animated
+transition. The position survives shell restarts (the active theme is
+Omarchy's own state).
+
+### No videos at all
 
 With a theme that has no `videos/` directory (the default for most themes), the plugin renders the static background exactly like the stock service — you can leave it enabled permanently.
 
