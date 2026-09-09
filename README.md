@@ -10,6 +10,7 @@ Desktop wallpaper renderer for [Omarchy](https://omarchy.org). Drop `videos/*.mp
 - Power-friendly: the video pauses while the session is locked or idle, and resumes in place when the desktop returns.
 - The video always matches the background: the clip is derived from the active background image (paired by file name), so cycling with `omarchy theme bg next` advances both in lockstep and they can never desync. The active clip also survives shell restarts for free (the background symlink is Omarchy's own persisted state).
 - Drop-in replacement for the built-in `omarchy.background` service: same layer, same namespace, same IPC surface (`themeTransition`, background symlink tracking, transitions).
+- Self-installing keybindings (video switcher carousel + prev/next) that only appear when you use a video tool, and are fully removable.
 
 ## Requirements
 
@@ -87,13 +88,40 @@ video-prev                              # -> previous clip + palette
 ```
 
 `video-next` / `video-prev` are installed at
-`~/.config/omarchy/plugins/p3lu.video-background/bin/` (bind them in your
-keymap, or prepend that directory to `PATH`). Each run is an
+`~/.config/omarchy/plugins/p3lu.video-background/bin/` (prepend that
+directory to `PATH` to use them from a terminal). Each run is an
 `omarchy theme set` to the next theme in the ordered cycle list
 (`~/.config/omarchy/video-themes`, maintained by the helper): the palette,
 background, and video all switch together with the usual animated
 transition. The position survives shell restarts (the active theme is
 Omarchy's own state).
+
+#### Keybindings (self-installing)
+
+The first time you run any video tool (`video-theme.sh`, `video-next`,
+`video-prev`, or the selector below), the plugin installs three keybindings
+into your `~/.config/hypr/bindings.lua` inside a self-contained marked block
+(it never touches your own lines, and the block is refreshed in place if the
+plugin moves):
+
+| Key | Action |
+|---|---|
+| `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of your video themes with poster previews (same UI as the wallpaper selector); selecting one switches video + palette |
+| `Super+Shift+Ctrl+Left` | Previous video theme |
+| `Super+Shift+Ctrl+Right` | Next video theme |
+
+They are installed on use rather than at plugin install: a plugin install
+hook does not exist in Omarchy, and the plugin should not claim your
+keymap until you actually use the feature. To install them manually:
+`video-bindings.sh` (in the plugin's `bin/` directory); to remove them:
+`video-bindings.sh --remove`.
+
+#### The video switcher
+
+`video-switcher.sh` is a thin wrapper around Omarchy's image menu (the same
+UI as the wallpaper switcher): it builds a poster carousel from the cycle
+list (or from every `video-*` theme when there is no list), preselects the
+current one, and runs `omarchy theme set` on the chosen poster.
 
 ### No videos at all
 
@@ -102,9 +130,16 @@ With a theme that has no `videos/` directory (the default for most themes), the 
 ## Uninstall
 
 ```bash
+# remove the installed keybindings (if you used any video tool)
+~/.config/omarchy/plugins/p3lu.video-background/bin/video-bindings.sh --remove
+
 omarchy plugin remove p3lu.video-background --yes
 omarchy plugin enable omarchy.background
 ```
+
+Themes created with `video-theme.sh` are regular Omarchy themes and can be
+removed like any other: delete `~/.config/omarchy/themes/<theme-name>` (and
+the cycle list entry in `~/.config/omarchy/video-themes`, if present).
 
 ## How it works
 

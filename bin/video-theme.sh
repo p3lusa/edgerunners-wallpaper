@@ -31,6 +31,10 @@
 
 set -euo pipefail
 
+# Self-deploy the video keybindings (idempotent, silent; no-op when already
+# present, so no Hyprland reload storms).
+"$(dirname "${BASH_SOURCE[0]}")/video-bindings.sh" --add --quiet || true
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   echo "Usage: $(basename "$0") <clip.mp4> [theme-name]" >&2
   exit 2
