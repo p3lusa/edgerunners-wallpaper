@@ -171,7 +171,13 @@ Item {
 
   Process {
     id: themeSwitchProc
-    command: ["bash", "-c", "theme=$(omarchy-theme-switcher); [[ -n $theme ]] && omarchy-theme-set \"$theme\" >/dev/null 2>&1 &"]
+    // Filtered theme switcher: hides the per-clip video themes (marked with
+    // .video-theme) so the stock theme selector stays clean. Falls back to
+    // the stock switcher when the plugin script is missing.
+    command: ["bash", "-c",
+      "VTS=\"$HOME/.config/omarchy/plugins/p3lu.video-background/bin/video-theme-switcher.sh\"; " +
+      "if [[ -x $VTS ]]; then theme=$(\"$VTS\"); else theme=$(omarchy-theme-switcher); fi; " +
+      "[[ -n $theme ]] && omarchy-theme-set \"$theme\" >/dev/null 2>&1 &"]
     onExited: root.refreshBackground()
   }
 
