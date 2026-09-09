@@ -16,16 +16,25 @@ Item {
   readonly property string currentBackgroundLink: stateHome + "/omarchy/current/background"
   readonly property string currentThemeLink: stateHome + "/omarchy/current/theme"
 
-  // Video wallpaper (Route A, additive): the active theme may ship a videos/
-  // directory. When it does, each panel plays the current clip (looped,
-  // video-only assets carry no audio track) on top of the image fallback.
-  // `omarchy theme bg next` / `bg set` advance to the next clip (cycle);
-  // `omarchy theme set` resets to the first clip. When the theme has no
-  // video, videoPath stays "" and the plugin behaves exactly like the stock
-  // omarchy.background image renderer.
+  // Video wallpaper: the active theme may ship a videos/ directory. When it
+  // does, each panel plays the current clip (looped; video-only assets carry
+  // no audio track) on top of the image fallback. `omarchy theme bg next` /
+  // `bg set` advance to the next clip (cycle); `omarchy theme set` resets to
+  // the first clip. When the theme has no video, videoPath stays "" and the
+  // plugin behaves exactly like the stock omarchy.background image renderer.
   property string videoPath: ""
-  property var videoList: []
-  property int videoIndex: 0
+  // Map of extension-less base name -> video path, for every videos/*.mp4 in
+  // the active theme. The clip is derived from the current background (same
+  // base name), so the video can never desync from the image: the background
+  // symlink is the single source of truth, and it is already Omarchy's
+  // persisted state (a restart resumes on the same clip for free).
+  property var videoByBase: ({})
+
+  // Occlusion: while the session is locked or idle (screensaver territory)
+  // the background layer is not visible, so decoding is paused to save
+  // battery and GPU. State is polled from the shell's first-party services
+  // (lock + idle), which also honors the user's own idle configuration.
+  property bool sessionOccluded: false
 
   property string currentBackground: ""
   property string displayedBackground: ""
@@ -57,42 +66,25 @@ Item {
     if (path === videoPath) return
     videoPath = path
     console.debug("[p3lu.video-background] video -> "
-        + (path !== ""
-           ? path + " (" + (videoIndex + 1) + "/" + videoList.length + ")"
-           : "(none, image fallback)"))
+        + (path !== "" ? path : "(none, image fallback)"))
   }
 
-  // New video list: if it changed (theme switch), reset to the first clip;
-  // if it is the same (re-read after `bg next`), keep the current index.
-  function setVideoList(list) {
-    var same = (list.length === videoList.length)
-    if (same) {
-      for (var i = 0; i < list.length; i++) {
-        if (list[i] !== videoList[i]) {
-          same = false
-          break
-        }
-      }
-    }
-    if (!same)
-      videoIndex = 0
-    videoList = list
-    applyVideoPath()
+  // Base name without directory or extension: "a/b/clip.mp4" -> "clip".
+  function baseKey(path) {
+    path = String(path || "")
+    var b = path.substring(path.lastIndexOf("/") + 1)
+    var dot = b.lastIndexOf(".")
+    return (dot > 0) ? b.substring(0, dot) : b
   }
 
-  // `omarchy theme bg next` / `bg set` on a theme with videos:
-  // advance to the next clip (cycle).
-  function cycleVideo() {
-    if (videoList.length === 0)
-      return
-    videoIndex = (videoIndex + 1) % videoList.length
-    applyVideoPath()
-  }
-
-  function applyVideoPath() {
-    var p = (videoIndex >= 0 && videoIndex < videoList.length)
-        ? videoList[videoIndex] : ""
-    setVideoPath(p)
+  // The video follows the current background: play the theme video whose base
+  // name matches the background image, if any. Called when the background
+  // changes and when the theme video list is (re)loaded.
+  function syncVideoToBackground() {
+    var key = (currentBackground === "") ? "" : baseKey(currentBackground)
+    var found = (key !== "" && videoByBase.hasOwnProperty(key))
+        ? videoByBase[key] : ""
+    setVideoPath(found)
   }
 
   function setBackground(path, instant) {
@@ -191,23 +183,24 @@ Item {
     }
   }
 
-  // Resolve the active theme's looping video, if any.
+  // Resolve the active theme's videos/*.mp4 and build the base-name map.
   // `omarchy theme set` / `theme bg next` also update the theme symlink, and
   // both paths funnel through setBackground/transitionBackground (IPC + poll),
-  // so re-resolving there keeps the video in sync with the active theme.
+  // so re-resolving there keeps the map in sync with the active theme.
   Process {
     id: themeVideoProc
     command: ["bash", "-c", "theme=$(readlink -f " + root.currentThemeLink + "); [[ -d $theme/videos ]] && ls $theme/videos/*.mp4 2>/dev/null | sort"]
     stdout: StdioCollector {
       onStreamFinished: {
+        var map = ({})
         var lines = String(text || "").split("\n")
-        var list = []
         for (var i = 0; i < lines.length; i++) {
           var p = lines[i].trim()
           if (p.length > 0)
-            list.push(p)
+            map[root.baseKey(p)] = p
         }
-        root.setVideoList(list)
+        root.videoByBase = map
+        root.syncVideoToBackground()
       }
     }
   }
@@ -221,7 +214,6 @@ Item {
 
     function set(path: string): void {
       root.setBackground(path, false)
-      root.cycleVideo()
     }
 
     function setInstant(path: string): void {
@@ -261,7 +253,97 @@ Item {
     }
   }
 
-  Component.onCompleted: refreshBackground()
+  Component.onCompleted: root.refreshBackground()
+
+  // When the active background changes, follow it with its paired video.
+  Connections {
+    target: root
+    function onCurrentBackgroundChanged() { root.syncVideoToBackground() }
+  }
+
+  // Stale-buffer recovery. The background layer can end up with an uncommitted
+  // surface buffer (observed right after a shell restart, and after parking
+  // behind the lock screen for a long time), leaving a flat desktop until a
+  // scene change forces a re-render. We force an invisible one: run the reveal
+  // transition with the same image on both sides (X over X changes nothing
+  // visually) so the compositor re-commits the surface. The transition state
+  // is cleared shortly after, since with no source change the base image never
+  // re-emits its status signal to do it naturally.
+  Timer {
+    id: startupPokeTimer
+    interval: 2000
+    repeat: false
+    running: true
+    onTriggered: root.pokeRerender()
+  }
+
+  Timer {
+    id: pokeCleanupTimer
+    interval: 900
+    repeat: false
+    onTriggered: {
+      root.incomingBackground = ""
+      root.oldBackground = ""
+      root.finishingTransition = false
+    }
+  }
+
+  function pokeRerender() {
+    if (root.displayedBackground === "")
+      return
+    if (root.incomingBackground !== "")
+      return // a real transition is in progress; it will re-render on its own
+    root.transitionBackground(root.displayedBackground, root.displayedBackground,
+        root.currentBackground, false, true)
+    pokeCleanupTimer.restart()
+  }
+
+  // When the desktop becomes visible again after lock/idle, force the same
+  // re-commit (the surface can go stale while parked behind the lock screen).
+  Connections {
+    target: root
+    function onSessionOccludedChanged() {
+      if (!root.sessionOccluded)
+        root.pokeRerender()
+    }
+  }
+
+  // Occlusion probe: asks the shell's first-party lock and idle services for
+  // the current state. Both answers are local IPC calls, so a 2s cadence is
+  // negligible. A failed call keeps the previous state.
+  Timer {
+    id: occlusionProbeTimer
+    interval: 2000
+    repeat: true
+    running: true
+    onTriggered: { if (!occlusionProbeProc.running) occlusionProbeProc.running = true }
+  }
+
+  Process {
+    id: occlusionProbeProc
+    command: ["bash", "-c",
+        "l=$(omarchy-shell lock isLocked 2>/dev/null); [[ -z $l ]] && l=false; "
+        + "s=$(omarchy-shell idle status 2>/dev/null); "
+        + "printf '%s %s\\n' \"$l\" \"$s\""]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        // Line format: "<lockIsLocked> <idleStatusJson>". The JSON is compact
+        // today but may not stay that way, so split on the first space only.
+        var t = String(text || "").trim()
+        var sp = t.indexOf(" ")
+        var lockedPart = (sp === -1) ? t : t.substring(0, sp)
+        var statusPart = (sp === -1) ? "" : t.substring(sp + 1)
+        var locked = (lockedPart === "true")
+        var idle = (statusPart.indexOf("\"idle\":true") !== -1)
+        var next = locked || idle
+        if (next !== root.sessionOccluded) {
+          console.log("[p3lu.video-background] "
+              + (next ? "occluded (lock/idle) -> pausing video" : "visible -> resuming video"))
+          root.sessionOccluded = next
+        }
+      }
+    }
+  }
 
   Variants {
     model: Quickshell.screens
@@ -323,15 +405,24 @@ Item {
       // copy. On the reference hardware (AMD 780M, H.264 1080p) that is a few
       // percent of one core. The image `base` underneath is always kept
       // current, so a missing/corrupt/unloadable video degrades to the image
-      // instead of a black screen.
+      // instead of a black screen. While the session is locked or idle the
+      // player is paused (the background layer is not visible anyway).
       MediaPlayer {
         id: videoPlayer
         source: root.videoPath !== "" ? root.imageUrl(root.videoPath) : ""
         autoPlay: true
         loops: -1 // infinite
         onPlaybackStateChanged: function() {
-          if (playbackState === MediaPlayer.PlayingState)
+          if (playbackState === MediaPlayer.PlayingState) {
+            // Pause immediately if the session became occluded while this
+            // clip was starting up (autoPlay would otherwise run it hidden).
+            if (root.sessionOccluded) {
+              videoPlayer.pause()
+              return
+            }
             console.log("[p3lu.video-background] playing " + root.videoPath + " on " + modelData.name)
+            videoOut.ensureFrameHook()
+          }
         }
         onErrorOccurred: function(error, errorString) {
           if (root.videoPath !== "")
@@ -339,12 +430,50 @@ Item {
         }
       }
 
+      // Occlusion pause/resume. This Qt build exposes play()/pause()/stop()
+      // methods (no writable paused property): play() on a paused player
+      // resumes it in place, preserving the loop position.
+      Connections {
+        target: root
+        function onSessionOccludedChanged() {
+          if (root.sessionOccluded) {
+            if (videoPlayer.playbackState === MediaPlayer.PlayingState)
+              videoPlayer.pause()
+          } else if (root.videoPath !== ""
+              && videoPlayer.playbackState === MediaPlayer.PausedState) {
+            videoPlayer.play()
+          }
+        }
+      }
+
       VideoOutput {
         id: videoOut
         anchors.fill: parent
         fillMode: Qt.KeepAspectRatioByExpanding
-        visible: root.videoPath !== "" && videoPlayer.playbackState === MediaPlayer.PlayingState
-        Component.onCompleted: videoPlayer.videoOutput = videoOut
+        // Reveal only after the first decoded frame: the image underneath
+        // (current poster) stays visible until real video pixels exist, so a
+        // clip change or a cold start never flashes a black frame.
+        property bool frameDecoded: false
+        property bool frameHooked: false
+        function ensureFrameHook() {
+          if (frameHooked || videoSink === null)
+            return
+          videoSink.videoFrameChanged.connect(function() {
+            videoOut.frameDecoded = true
+          })
+          frameHooked = true
+        }
+        visible: root.videoPath !== ""
+            && videoPlayer.playbackState === MediaPlayer.PlayingState
+            && videoOut.frameDecoded
+        Component.onCompleted: {
+          videoPlayer.videoOutput = videoOut
+          videoOut.ensureFrameHook()
+        }
+        Connections {
+          target: root
+          function onVideoPathChanged() { videoOut.frameDecoded = false }
+        }
       }
 
       Image {
