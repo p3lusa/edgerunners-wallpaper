@@ -89,8 +89,12 @@ video-prev                              # -> previous clip + palette
 
 Note: a created theme is a regular Omarchy theme, so it also appears in the
 stock theme switcher (Omarchy lists every installed theme — there is no
-hidden-theme mechanism). If you only want your video themes reachable through
-the video tools, remove the ones you don't use: `omarchy theme remove <theme>`.
+hidden-theme mechanism). With one theme per clip that is usually a feature:
+the stock theme switcher becomes a second way to jump to any video + palette
+pair. Cleanup is automatic: every theme created by `video-theme.sh` carries a
+marker, and the next time any video tool runs, marked themes that are neither
+active nor in the cycle list are removed (abandoned themes stop cluttering
+the switcher). To remove one immediately: `omarchy theme remove <theme>`.
 
 `video-next` / `video-prev` are installed at
 `~/.config/omarchy/plugins/p3lu.video-background/bin/` (prepend that
