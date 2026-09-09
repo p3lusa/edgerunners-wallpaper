@@ -36,6 +36,8 @@ set -euo pipefail
 "$(dirname "${BASH_SOURCE[0]}")/video-bindings.sh" --add --quiet || true
 # Reap abandoned per-clip themes (silent no-op when nothing to clean).
 "$(dirname "${BASH_SOURCE[0]}")/video-cleanup.sh" || true
+# Keep the theme menu clean (idempotent, silent).
+"$(dirname "${BASH_SOURCE[0]}")/video-menu.sh" --add --quiet || true
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
   echo "Usage: $(basename "$0") <clip.mp4> [theme-name]" >&2

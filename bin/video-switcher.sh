@@ -29,6 +29,8 @@ PLUGIN_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "$PLUGIN_BIN/video-bindings.sh" --add --quiet || true
 # Reap abandoned per-clip themes (silent no-op when nothing to clean).
 "$PLUGIN_BIN/video-cleanup.sh" || true
+# Keep the theme menu clean (idempotent, silent).
+"$PLUGIN_BIN/video-menu.sh" --add --quiet || true
 
 USER_THEMES="$HOME/.config/omarchy/themes"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/video-switcher"
