@@ -89,12 +89,16 @@ video-prev                              # -> previous clip + palette
 
 `video-next` / `video-prev` are installed at
 `~/.config/omarchy/plugins/p3lu.video-background/bin/` (prepend that
-directory to `PATH` to use them from a terminal). Each run is an
-`omarchy theme set` to the next theme in the ordered cycle list
-(`~/.config/omarchy/video-themes`, maintained by the helper): the palette,
-background, and video all switch together with the usual animated
-transition. The position survives shell restarts (the active theme is
-Omarchy's own state).
+directory to `PATH` to use them from a terminal). They walk the whole video
+library — every clip of every theme that has videos, the same set the
+switcher shows. Theme order: the cycle list first
+(`~/.config/omarchy/video-themes`, maintained by `video-theme.sh`), then any
+remaining video themes alphabetically; clips within a theme are
+alphabetical. Switching to a clip of another theme is an `omarchy theme set`
+(palette, background, and video all switch together with the usual animated
+transition); switching to another clip of the current theme only changes the
+video (the palette stays). The position survives shell restarts (the active
+theme + background are Omarchy's own state).
 
 #### Keybindings (self-installing)
 
@@ -107,8 +111,8 @@ plugin moves):
 | Key | Action |
 |---|---|
 | `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of your whole video library with poster previews (same UI as the wallpaper selector). The list is stable: it shows every clip of every theme that has videos, no matter which theme is active. Selecting a clip of the active theme switches the video (same palette); selecting a clip from another theme switches video + palette |
-| `Super+Ctrl+Alt+Left` | Previous video theme |
-| `Super+Ctrl+Alt+Right` | Next video theme |
+| `Super+Ctrl+Alt+Left` | Previous video (cycles through the whole library) |
+| `Super+Ctrl+Alt+Right` | Next video (cycles through the whole library) |
 
 They are installed on use rather than at plugin install: a plugin install
 hook does not exist in Omarchy, and the plugin should not claim your

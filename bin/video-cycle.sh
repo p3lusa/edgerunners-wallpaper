@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# video-cycle.sh — switch to the next (or previous) video theme.
+# video-cycle.sh — switch to the next (or previous) video in the library.
 #
-# Each clip created with video-theme.sh is its own theme (own palette via
-# Aether, own video). This walks the ordered cycle list that the helper
-# maintains and activates the adjacent theme: `omarchy theme set` does the
-# rest (re-stage, animated palette + background transition, video follows).
+# The library is the same set the switcher shows: every clip of every user
+# theme that has videos (a background poster with a paired video in
+# videos/). Theme order: the cycle list first (~/.config/omarchy/
+# video-themes, maintained by video-theme.sh), then any remaining video
+# themes alphabetically. Clips within a theme are alphabetical.
+#
+# Switching to a clip of another theme runs `omarchy theme set` (video +
+# palette change); switching to a clip of the current theme only runs
+# `omarchy theme bg set` (palette stays).
 #
 # Usage:
 #   video-cycle.sh next
 #   video-cycle.sh prev
 #
 # The wrappers video-next.sh / video-prev.sh call this script.
-#
-# List file: ~/.config/omarchy/video-themes (one theme name per line, in
-# cycle order). If the currently active theme is not in the list, the cycle
-# starts at its first entry.
 
 set -euo pipefail
 
@@ -28,61 +29,108 @@ if [[ $# -ne 1 || ( "$1" != "next" && "$1" != "prev" ) ]]; then
 fi
 direction="$1"
 
-list="${HOME}/.config/omarchy/video-themes"
-if [[ ! -f "$list" ]]; then
-  echo "error: no video themes registered." >&2
-  echo "       create one first: video-theme.sh <clip.mp4> [theme-name]" >&2
-  exit 1
+USER_THEMES="$HOME/.config/omarchy/themes"
+list="$HOME/.config/omarchy/video-themes"
+CURRENT_THEME="$(tr -d '[:space:]' < "$HOME/.local/state/omarchy/current/theme.name" 2>/dev/null || echo "")"
+CURRENT_BG="$(readlink -f "$HOME/.local/state/omarchy/current/background" 2>/dev/null || true)"
+CUR_BASE=""
+if [[ -n $CURRENT_BG ]]; then
+  CUR_BASE="${CURRENT_BG##*/}"
+  CUR_BASE="${CUR_BASE%.*}"
 fi
 
-themes=()
-while IFS= read -r line; do
-  line="${line#"${line%%[![:space:]]*}"}"   # ltrim
-  line="${line%"${line##*[![:space:]]}"}"   # rtrim
-  [[ -n "$line" ]] && themes+=("$line")
-done < "$list"
+# --- scan the library: themes that have at least one clip ------------------
+declare -A theme_clips=()
+for tdir in "$USER_THEMES"/*/; do
+  [[ -d $tdir ]] || continue
+  [[ -d "$tdir/backgrounds" && -d "$tdir/videos" ]] || continue
+  t="${tdir%/}"; t="${t##*/}"
+  clips=()
+  for poster in "$tdir"/backgrounds/*; do
+    [[ -f $poster ]] || continue
+    base="${poster##*/}"; base="${base%.*}"
+    [[ -f "$tdir/videos/$base.mp4" ]] || continue
+    clips+=("$(basename "$poster")")
+  done
+  if (( ${#clips[@]} > 0 )); then
+    theme_clips["$t"]="$(printf '%s\n' "${clips[@]}" | sort | tr '\n' ' ')"
+  fi
+done
 
-n=${#themes[@]}
-if (( n == 0 )); then
-  echo "error: the video-theme list is empty: $list" >&2
+(( ${#theme_clips[@]} > 0 )) || {
+  echo "error: no videos found in $USER_THEMES." >&2
+  echo "       a video theme needs backgrounds/ posters with paired videos/ clips." >&2
   exit 1
+}
+
+# --- theme order: cycle list first, the rest alphabetically -----------------
+ordered=()
+declare -A ordered_seen=()
+if [[ -f $list ]]; then
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"   # ltrim
+    line="${line%"${line##*[![:space:]]}"}"   # rtrim
+    if [[ -n $line && -n ${theme_clips[$line]:-} && -z ${ordered_seen[$line]:-} ]]; then
+      ordered+=("$line")
+      ordered_seen["$line"]=1
+    fi
+  done <"$list"
 fi
+while IFS= read -r t; do
+  if [[ -z ${ordered_seen[$t]:-} ]]; then
+    ordered+=("$t")
+    ordered_seen["$t"]=1
+  fi
+done < <(printf '%s\n' "${!theme_clips[@]}" | sort)
 
-# The active theme name is recorded by Omarchy in current/theme.name (the
-# staged theme directory itself is a generic copy).
-current="$(tr -d '[:space:]' < "${HOME}/.local/state/omarchy/current/theme.name" 2>/dev/null || echo "")"
+# --- flat entry list: "theme<TAB>poster" ------------------------------------
+entries=()
+for t in "${ordered[@]}"; do
+  for c in ${theme_clips[$t]}; do
+    entries+=("$t"$'\t'"$c")
+  done
+done
+n=${#entries[@]}
 
+# --- find the currently playing video ---------------------------------------
 idx=-1
-for i in "${!themes[@]}"; do
-  if [[ "${themes[$i]}" == "$current" ]]; then
+for i in "${!entries[@]}"; do
+  IFS=$'\t' read -r et ec <<<"${entries[$i]}"
+  if [[ $et == "$CURRENT_THEME" && $ec == "$CUR_BASE".* ]]; then
     idx=$i
     break
   fi
 done
 
-if [[ "$direction" == "next" ]]; then
-  if (( idx == -1 )); then
-    next_idx=0
-  else
-    next_idx=$(( (idx + 1) % n ))
-  fi
+if [[ $direction == next ]]; then
+  next_idx=$(( (idx + 1) % n ))
 else
-  if (( idx == -1 )); then
-    next_idx=0
-  else
-    next_idx=$(( (idx - 1 + n) % n ))
+  next_idx=$(( (idx - 1 + n) % n ))
+fi
+if (( idx == -1 )); then
+  next_idx=0
+fi
+
+# --- apply -------------------------------------------------------------------
+IFS=$'\t' read -r t c <<<"${entries[$next_idx]}"
+clip_base="${c%.*}"
+
+if [[ $t != "$CURRENT_THEME" ]]; then
+  if ! omarchy theme set "$t" >/dev/null 2>&1; then
+    echo "error: omarchy theme set $t failed" >&2
+    exit 1
   fi
 fi
 
-next="${themes[$next_idx]}"
-
-if [[ "$next" == "$current" ]] && (( n == 1 )); then
-  echo "only one video theme registered: $next (already active)"
-  exit 0
+# Only touch the background when it is not already the playing one.
+staged_bg="$(readlink -f "$HOME/.local/state/omarchy/current/background" 2>/dev/null || true)"
+staged_base=""
+if [[ -n $staged_bg ]]; then
+  staged_base="${staged_bg##*/}"
+  staged_base="${staged_base%.*}"
+fi
+if [[ $staged_base != "$clip_base" ]]; then
+  omarchy theme bg set "$HOME/.local/state/omarchy/current/theme/backgrounds/$c" >/dev/null 2>&1
 fi
 
-if ! omarchy theme set "$next" >/dev/null 2>&1; then
-  echo "error: omarchy theme set $next failed" >&2
-  exit 1
-fi
-echo "video theme: $next"
+echo "video: $t / $clip_base"
