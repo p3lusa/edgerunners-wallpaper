@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "p3lu.video-background",
   "name": "Video Background",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "p3lusa",
   "description": "Desktop wallpaper renderer (Route A superset of omarchy.background). Plays the active theme's looping, muted video when that theme ships a videos/ directory, and otherwise behaves exactly like the stock image background (current/background symlink, themeTransition IPC, transitions).",
   "kinds": [
