@@ -17,11 +17,15 @@ Item {
   readonly property string currentThemeLink: stateHome + "/omarchy/current/theme"
 
   // Video wallpaper (Route A, additive): the active theme may ship a videos/
-  // directory. When it does, each panel plays that clip (looped, video-only
-  // assets carry no audio track) on top of the image fallback. When the theme
-  // has no video, this stays "" and the plugin behaves exactly like the stock
+  // directory. When it does, each panel plays the current clip (looped,
+  // video-only assets carry no audio track) on top of the image fallback.
+  // `omarchy theme bg next` / `bg set` advance to the next clip (cycle);
+  // `omarchy theme set` resets to the first clip. When the theme has no
+  // video, videoPath stays "" and the plugin behaves exactly like the stock
   // omarchy.background image renderer.
   property string videoPath: ""
+  property var videoList: []
+  property int videoIndex: 0
 
   property string currentBackground: ""
   property string displayedBackground: ""
@@ -52,6 +56,43 @@ Item {
     path = String(path || "").trim()
     if (path === videoPath) return
     videoPath = path
+    console.debug("[p3lu.video-background] video -> "
+        + (path !== ""
+           ? path + " (" + (videoIndex + 1) + "/" + videoList.length + ")"
+           : "(none, image fallback)"))
+  }
+
+  // New video list: if it changed (theme switch), reset to the first clip;
+  // if it is the same (re-read after `bg next`), keep the current index.
+  function setVideoList(list) {
+    var same = (list.length === videoList.length)
+    if (same) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] !== videoList[i]) {
+          same = false
+          break
+        }
+      }
+    }
+    if (!same)
+      videoIndex = 0
+    videoList = list
+    applyVideoPath()
+  }
+
+  // `omarchy theme bg next` / `bg set` on a theme with videos:
+  // advance to the next clip (cycle).
+  function cycleVideo() {
+    if (videoList.length === 0)
+      return
+    videoIndex = (videoIndex + 1) % videoList.length
+    applyVideoPath()
+  }
+
+  function applyVideoPath() {
+    var p = (videoIndex >= 0 && videoIndex < videoList.length)
+        ? videoList[videoIndex] : ""
+    setVideoPath(p)
   }
 
   function setBackground(path, instant) {
@@ -156,9 +197,18 @@ Item {
   // so re-resolving there keeps the video in sync with the active theme.
   Process {
     id: themeVideoProc
-    command: ["bash", "-c", "theme=$(readlink -f " + root.currentThemeLink + "); [[ -d $theme/videos ]] && ls $theme/videos/*.mp4 2>/dev/null | sort | head -n1"]
+    command: ["bash", "-c", "theme=$(readlink -f " + root.currentThemeLink + "); [[ -d $theme/videos ]] && ls $theme/videos/*.mp4 2>/dev/null | sort"]
     stdout: StdioCollector {
-      onStreamFinished: root.setVideoPath(String(text || ""))
+      onStreamFinished: {
+        var lines = String(text || "").split("\n")
+        var list = []
+        for (var i = 0; i < lines.length; i++) {
+          var p = lines[i].trim()
+          if (p.length > 0)
+            list.push(p)
+        }
+        root.setVideoList(list)
+      }
     }
   }
 
@@ -171,6 +221,7 @@ Item {
 
     function set(path: string): void {
       root.setBackground(path, false)
+      root.cycleVideo()
     }
 
     function setInstant(path: string): void {
