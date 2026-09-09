@@ -67,6 +67,37 @@ done
   exit 1
 }
 
+# --- dedupe: a per-clip theme (.video-theme marker) claims its clip; other
+#     themes drop the same clip so the cycle never visits it twice ----------
+declare -A claimed=()
+declare -A marked=()
+for tdir in "$USER_THEMES"/*/; do
+  [[ -f "${tdir}.video-theme" ]] || continue
+  t="${tdir%/}"; t="${t##*/}"
+  marked["$t"]=1
+  for c in ${theme_clips[$t]:-}; do
+    claimed["${c%.*}"]=1
+  done
+done
+for t in "${!theme_clips[@]}"; do
+  [[ -n ${marked[$t]:-} ]] && continue
+  keep=()
+  for c in ${theme_clips[$t]}; do
+    [[ -n ${claimed["${c%.*}"]:-} ]] && continue
+    keep+=("$c")
+  done
+  if (( ${#keep[@]} > 0 )); then
+    theme_clips["$t"]="$(printf '%s\n' "${keep[@]}" | sort | tr '\n' ' ')"
+  else
+    unset "theme_clips[$t]"
+  fi
+done
+
+(( ${#theme_clips[@]} > 0 )) || {
+  echo "error: no videos found in $USER_THEMES." >&2
+  exit 1
+}
+
 # --- theme order: cycle list first, the rest alphabetically -----------------
 ordered=()
 declare -A ordered_seen=()

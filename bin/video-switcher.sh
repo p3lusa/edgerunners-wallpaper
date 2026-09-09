@@ -64,6 +64,34 @@ done
 
 (( ${#theme_clips[@]} > 0 )) || exit 0
 
+# --- dedupe: a per-clip theme (.video-theme marker) claims its clip; other
+#     themes drop the same clip so the carousel never lists it twice --------
+declare -A claimed=()
+declare -A marked=()
+for tdir in "$USER_THEMES"/*/; do
+  [[ -f "${tdir}.video-theme" ]] || continue
+  t="${tdir%/}"; t="${t##*/}"
+  marked["$t"]=1
+  for c in ${theme_clips[$t]:-}; do
+    claimed["${c%.*}"]=1
+  done
+done
+for t in "${!theme_clips[@]}"; do
+  [[ -n ${marked[$t]:-} ]] && continue
+  keep=()
+  for c in ${theme_clips[$t]}; do
+    [[ -n ${claimed["${c%.*}"]:-} ]] && continue
+    keep+=("$c")
+  done
+  if (( ${#keep[@]} > 0 )); then
+    theme_clips["$t"]="${keep[*]}"
+  else
+    unset "theme_clips[$t]"
+  fi
+done
+
+(( ${#theme_clips[@]} > 0 )) || exit 0
+
 # Active theme first, the rest alphabetically.
 ordered=()
 if [[ -n $CURRENT_THEME && -n ${theme_clips[$CURRENT_THEME]:-} ]]; then

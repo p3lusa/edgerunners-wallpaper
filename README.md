@@ -100,7 +100,8 @@ the switcher). To remove one immediately: `omarchy theme remove <theme>`.
 `~/.config/omarchy/plugins/p3lu.video-background/bin/` (prepend that
 directory to `PATH` to use them from a terminal). They walk the whole video
 library — every clip of every theme that has videos, the same set the
-switcher shows. Theme order: the cycle list first
+switcher shows (per-clip themes win over library copies of the same clip,
+so each video is visited exactly once). Theme order: the cycle list first
 (`~/.config/omarchy/video-themes`, maintained by `video-theme.sh`), then any
 remaining video themes alphabetically; clips within a theme are
 alphabetical. Switching to a clip of another theme is an `omarchy theme set`
@@ -147,8 +148,13 @@ you still see every video.
 
 Entry naming: the active theme's clips appear by clip name; a theme with a
 single clip appears by theme name; clips from other themes are prefixed with
-the theme name (so the same clip in two themes stays two entries). The
-currently playing video is preselected.
+the theme name. The currently playing video is preselected.
+
+A clip is never listed twice: when the same clip exists both as a per-clip
+theme (created by `video-theme.sh`, marked with `.video-theme`) and as a
+plain `videos/` entry of another theme, the per-clip theme wins — it carries
+the clip's own palette, so the carousel and the prev/next cycle stay at one
+entry per video.
 
 Choosing an entry: a clip of the active theme runs `omarchy theme bg set`
 (video changes, palette stays); a clip from another theme runs `omarchy
