@@ -106,7 +106,7 @@ plugin moves):
 
 | Key | Action |
 |---|---|
-| `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of all your videos with poster previews (same UI as the wallpaper selector): the current theme's clips, plus your per-clip video themes. Selecting a clip switches the video within the current theme (same palette); selecting a video theme switches video + palette |
+| `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of your whole video library with poster previews (same UI as the wallpaper selector). The list is stable: it shows every clip of every theme that has videos, no matter which theme is active. Selecting a clip of the active theme switches the video (same palette); selecting a clip from another theme switches video + palette |
 | `Super+Ctrl+Alt+Left` | Previous video theme |
 | `Super+Ctrl+Alt+Right` | Next video theme |
 
@@ -119,13 +119,20 @@ keymap until you actually use the feature. To install them manually:
 #### The video switcher
 
 `video-switcher.sh` is a thin wrapper around Omarchy's image menu (the same
-UI as the wallpaper switcher). It builds a poster carousel with two kinds of
-entries: the active theme's own clips (each background with a paired video in
-`videos/`), and the per-clip video themes (the cycle list maintained by
-`video-theme.sh`, falling back to every `video-*` theme). The current video is
-preselected. Choosing a clip runs `omarchy theme bg set` (video changes,
-palette stays); choosing a video theme runs `omarchy theme set` (video and
-palette change together).
+UI as the wallpaper switcher). It builds a poster carousel of your whole
+video library: every clip of every user theme that has videos (each clip is a
+background poster with a paired video in `videos/`). The list is stable — it
+does not change when you cycle themes — so after `video-next`/`video-prev`
+you still see every video.
+
+Entry naming: the active theme's clips appear by clip name; a theme with a
+single clip appears by theme name; clips from other themes are prefixed with
+the theme name (so the same clip in two themes stays two entries). The
+currently playing video is preselected.
+
+Choosing an entry: a clip of the active theme runs `omarchy theme bg set`
+(video changes, palette stays); a clip from another theme runs `omarchy
+theme set` + `omarchy theme bg set` (video and palette change together).
 
 ### No videos at all
 
