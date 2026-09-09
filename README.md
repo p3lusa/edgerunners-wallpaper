@@ -47,6 +47,25 @@ omarchy plugin disable omarchy.background
 
 The first command installs and enables the plugin; the second hands the background layer over to it (only one background renderer should be active — they share the same layer namespace).
 
+### Companion theme (recommended for the full experience)
+
+The plugin works with *any* theme that ships a `videos/` directory, but the
+companion [**video-wallpaper theme**](https://github.com/p3lusa/video-wallpaper)
+is where the whole experience lives: it provides the library home that
+`video-add` mirrors into, sample clips to start with, and the neon skin:
+
+```bash
+omarchy theme install https://github.com/p3lusa/video-wallpaper.git
+omarchy theme set video-wallpaper
+```
+
+With both installed you get the complete feature set out of the box: video
+wallpapers from your own clips, per-clip Aether palettes, the cycler, the
+unified wallpaper switcher, and the `video-manage` library TUI. The theme is
+optional — a plain image theme with a `videos/` directory added by hand works
+too — but the library tools assume the `video-wallpaper` theme as the
+library's home (if it's missing, `video-add` simply skips the mirror).
+
 ## Creating a theme from your own clip (Aether)
 
 This plugin ships a helper, `bin/video-theme.sh` (installed at `~/.config/omarchy/plugins/p3lu.video-background/bin/video-theme.sh`), that turns any clip into a complete, palette-matched Omarchy theme in one command:
@@ -65,8 +84,11 @@ Prerequisites: `aether` in `PATH`, `ffmpeg`/`ffprobe`, and this plugin enabled (
 
 `video-manage.sh` is a terminal UI (built on `gum`, styled by the active
 theme's palette) that does the whole job: browse the library with live
-status, play any clip (video + palette), add a new clip through a native
-file picker, and remove one with a confirmation prompt.
+status (a themed header card, an accent-colored “● playing” marker, dimmed
+kind tags), play any clip (video + palette), add a new clip through a
+native file picker, and remove one with a confirmation prompt. Long
+operations (Aether generation, removal) run behind a spinner with live
+output.
 
 ```bash
 video-manage
