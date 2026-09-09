@@ -52,9 +52,13 @@ strip_block() {
 
 block_content() {
   cat <<EOF
-o.bind("SUPER + CTRL + ALT + SPACE", "Video switcher", "$PLUGIN_BIN/video-switcher.sh")
-o.bind("SUPER + CTRL + ALT + LEFT", "Previous video", "$PLUGIN_BIN/video-prev.sh")
-o.bind("SUPER + CTRL + ALT + RIGHT", "Next video", "$PLUGIN_BIN/video-next.sh")
+-- Replaces the stock "Background switcher" key (Super+Ctrl+Space) with the
+-- unified wallpaper picker: video switcher on video themes, stock background
+-- picker on image themes. The dedicated switcher key is no longer needed.
+hl.unbind("SUPER + CTRL + SPACE")
+o.bind("SUPER + CTRL + SPACE", "Wallpaper switcher", "$PLUGIN_BIN/video-bg-picker.sh")
+o.bind("SUPER + CTRL + ALT + LEFT", "Previous wallpaper video", "$PLUGIN_BIN/video-prev.sh")
+o.bind("SUPER + CTRL + ALT + RIGHT", "Next wallpaper video", "$PLUGIN_BIN/video-next.sh")
 EOF
 }
 

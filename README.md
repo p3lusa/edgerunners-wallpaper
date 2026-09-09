@@ -108,16 +108,23 @@ theme + background are Omarchy's own state).
 #### Keybindings (self-installing)
 
 The first time you run any video tool (`video-theme.sh`, `video-next`,
-`video-prev`, or the selector below), the plugin installs three keybindings
-into your `~/.config/hypr/bindings.lua` inside a self-contained marked block
+`video-prev`, or the picker below), the plugin installs keybindings into
+your `~/.config/hypr/bindings.lua` inside a self-contained marked block
 (it never touches your own lines, and the block is refreshed in place if the
 plugin moves):
 
 | Key | Action |
 |---|---|
-| `Super+Ctrl+Alt+Space` | **Video switcher** — a carousel of your whole video library with poster previews (same UI as the wallpaper selector). The list is stable: it shows every clip of every theme that has videos, no matter which theme is active. Selecting a clip of the active theme switches the video (same palette); selecting a clip from another theme switches video + palette |
+| `Super+Ctrl+Space` | **Wallpaper switcher (unified)** — takes over the stock wallpaper key. On video themes it opens the video switcher (a carousel of your whole video library with poster previews); on image themes it opens the stock background picker, exactly as before. Selecting a clip of the active theme switches the video (same palette); selecting a clip from another theme switches video + palette |
 | `Super+Ctrl+Alt+Left` | Previous video (cycles through the whole library) |
 | `Super+Ctrl+Alt+Right` | Next video (cycles through the whole library) |
+
+The unified picker is installed by unbinding the stock
+`Super+Ctrl+Space` (Hyprland Lua `hl.unbind`) and rebinding it to
+`video-bg-picker.sh`, which decides at press time which picker to open. So
+the same key keeps working everywhere; only its content changes with the
+active theme. Removing the block (`video-bindings.sh --remove`) restores
+the stock behavior.
 
 They are installed on use rather than at plugin install: a plugin install
 hook does not exist in Omarchy, and the plugin should not claim your
