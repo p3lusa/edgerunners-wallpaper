@@ -47,7 +47,7 @@ say() { (( QUIET )) || echo "$@"; }
 # The override property as one JSONC line. Only "action" is overridden; the
 # stock icon/label/aliases are kept by the menu merge.
 override_line() {
-  printf '  "style.theme": {"action":"VTS=\\\"%s/video-theme-switcher.sh\\\"; if [[ -x $VTS ]]; then theme=$(\\\"$VTS\\\"); else theme=$(omarchy-theme-switcher); fi; [[ -n $theme ]] && omarchy-theme-set \\"$theme\\""}\n' "$PLUGIN_BIN"
+  printf '  "style.theme": {"icon":"","label":"Theme","aliases":["theme","themes"],"action":"VTS=\\\"%s/video-theme-switcher.sh\\\"; if [[ -x $VTS ]]; then theme=$(\\\"$VTS\\\"); else theme=$(omarchy-theme-switcher); fi; [[ -n $theme ]] && omarchy-theme-set \\\"$theme\\\""}\n' "$PLUGIN_BIN"
 }
 
 block() {
