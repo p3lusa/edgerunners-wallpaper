@@ -29,6 +29,12 @@ Item {
   // symlink is the single source of truth, and it is already Omarchy's
   // persisted state (a restart resumes on the same clip for free).
   property var videoByBase: ({})
+  // True once the active theme's videos/*.mp4 listing has finished loading.
+  // While false the map is empty because the `ls` is still in flight, not
+  // because the theme ships no videos; syncVideoToBackground must not fall
+  // back to the image in that window, or videoPath flaps to "" and back and
+  // the MediaPlayer restarts (the visible flash on startup / bg change).
+  property bool videoMapLoaded: false
 
   // Occlusion: while the session is locked or idle (screensaver territory)
   // the background layer is not visible, so decoding is paused to save
@@ -84,7 +90,12 @@ Item {
     var key = (currentBackground === "") ? "" : baseKey(currentBackground)
     var found = (key !== "" && videoByBase.hasOwnProperty(key))
         ? videoByBase[key] : ""
-    setVideoPath(found)
+    // Only fall back to the image once the listing has actually loaded.
+    // While videoMapLoaded is false the map is empty because the `ls` is in
+    // flight; clearing videoPath here would flap it to "" and back, restarting
+    // the MediaPlayer and flashing the image behind the video.
+    if (found !== "") setVideoPath(found)
+    else if (videoMapLoaded) setVideoPath("")
   }
 
   function setBackground(path, instant) {
@@ -209,6 +220,10 @@ Item {
   Process {
     id: themeVideoProc
     command: ["bash", "-c", "theme=$(readlink -f " + root.currentThemeLink + "); [[ -d $theme/videos ]] && ls $theme/videos/*.mp4 2>/dev/null | sort"]
+    // A relaunch (theme change, poll) means the map is about to be rebuilt;
+    // clear the loaded flag so syncVideoToBackground doesn't fall back to the
+    // image on the stale/empty map during the gap.
+    onRunningChanged: function(running) { if (running) root.videoMapLoaded = false }
     stdout: StdioCollector {
       onStreamFinished: {
         var map = ({})
@@ -219,6 +234,7 @@ Item {
             map[root.baseKey(p)] = p
         }
         root.videoByBase = map
+        root.videoMapLoaded = true
         root.syncVideoToBackground()
       }
     }
