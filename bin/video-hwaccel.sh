@@ -1,31 +1,34 @@
 #!/usr/bin/env bash
-# video-hwaccel.sh -- detect the user's GPU(s) and write the Qt FFmpeg
-# hardware-acceleration environment for the video wallpaper.
+# video-hwaccel.sh -- detect the user's GPU(s) and set up GPU-accelerated
+# video decoding for the wallpaper (Qt Multimedia FFmpeg backend).
 #
 # The wallpaper is decoded by Qt Multimedia's FFmpeg backend (Background.qml's
-# MediaPlayer), NOT by any .sh script. To make it use the GPU we set the
-# QT_FFMPEG_* environment variables that the Qt FFmpeg plugin reads:
+# MediaPlayer), NOT by any .sh script. The plugin reads QT_FFMPEG_* variables
+# from the session environment:
 #   QT_FFMPEG_DECODING_HW_DEVICE_TYPES   (e.g. "vaapi" or "cuda")
 #   QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH  (broaden VAAPI profile coverage)
+# Without them, Qt probes vdpau -> vulkan -> cuda before vaapi, which on
+# integrated AMD/Intel GPUs spams the journal with "Invalid setup for format"
+# and may fall back to CPU decode.
 #
-# PHASE 1 (this script as-is): DETECTION only. It detects the GPU family and
-# writes hwaccel.env + hwaccel.log next to this script. It does NOT yet inject
-# the env into the omarchy-shell session (that is phase 2, the --apply path).
+# MODES:
+#   (no args)       detection only: writes hwaccel.env + hwaccel.log next to
+#                   this script. Nothing is applied to the session.
+#   --apply         detection + writes a systemd-user drop-in on the
+#                   wayland-wm@.service template so the compositor session
+#                   (and quickshell within it) inherits the variables.
+#                   Idempotent: safe to run on every post-update.
 #
-# Design (see docs/PLAN-hwaccel-gpu.md):
+# Detection (see docs/PLAN-hwaccel-gpu.md):
 #   NVIDIA (dedicated)                 -> cuda   (NVDEC lives on the dGPU)
-#   Intel iGPU / AMD (iGPU or dGPU)    -> vaapi  (VAAPI covers both; it is the
-#                                                single path for the iGPUs that
-#                                                dominate laptops)
+#   Intel iGPU / AMD (iGPU or dGPU)    -> vaapi  (VAAPI covers both)
 #   nothing usable                     -> cpu    (comment-only env; never break)
-# The backend list is short and vendor-specific (user decision); Qt itself
-# falls back to CPU decode if the chosen HW backend fails.
-#
-# Both integrated and dedicated GPUs are ENUMERATED and logged. On a hybrid
-# (iGPU+dGPU) the script records every GPU + its render node and picks the best
-# VAAPI node. The Qt FFmpeg backend cannot be pinned to a specific render node
-# (no such env var), so on a hybrid it uses the session default node -- the log
-# still tells you exactly what hardware is present.
+# All display GPUs (integrated AND dedicated) are enumerated via lspci and
+# each /dev/dri render node is mapped to its physical GPU by PCI. On hybrid
+# iGPU+dGPU the non-Intel (dedicated) node is preferred in the log. The Qt
+# FFmpeg backend cannot be pinned to a specific render node (no such env var),
+# so on a hybrid VAAPI uses the session default node; the log still shows
+# exactly which chip owns which node.
 
 set -euo pipefail
 
@@ -35,11 +38,10 @@ ENV_FILE="$PLUGIN_ROOT/hwaccel.env"
 LOG_FILE="$PLUGIN_ROOT/hwaccel.log"
 # DRM root is overridable for testability / exotic layouts (default /dev/dri).
 DRI_ROOT="${VIDEO_HWACCEL_DRI_ROOT:-/dev/dri}"
-
-mkdir -p "$PLUGIN_ROOT"
-: > "$LOG_FILE"
-
-log() { printf '%s\n' "$*" >> "$LOG_FILE"; printf '%s\n' "$*"; }
+# systemd-user template the compositor session runs under (uwsm/Omarchy).
+WM_TEMPLATE="wayland-wm@.service"
+DROPIN_DIR="$HOME/.config/systemd/user/${WM_TEMPLATE}.d"
+DROPIN_FILE="$DROPIN_DIR/10-video-hwaccel.conf"
 
 # --- helpers -----------------------------------------------------------------
 lsmod_mods="$(lsmod 2>/dev/null | awk 'NR>0{print $1}' || true)"
@@ -62,9 +64,6 @@ norm_pci() {
 }
 
 # --- GPU discovery: enumerate EVERY display GPU ------------------------------
-# lspci -nnk prints one block per device; the first line carries the PCI id and
-# vendor, a later line carries "Kernel driver in use: <mod>". We collect every
-# VGA/3D/Display controller line together with its in-use driver.
 lspci_all=""
 declare -a GPU_PCI=() GPU_DRV=() GPU_LINE=()
 if command -v lspci >/dev/null 2>&1; then
@@ -96,15 +95,6 @@ if command -v lspci >/dev/null 2>&1; then
         fi
         ;;
     esac
-    # a non-address line that isn't a display controller / driver note resets
-    # the block so a stray "Kernel driver" from another device doesn't leak in.
-    if [[ -n $_cur_pci && $_cur_keep == true ]]; then
-      if [[ $_line != *"Kernel driver in use:"* ]]; then
-        # keep going; the next address line will flush. Only reset on a
-        # blank line (block separator).
-        [[ -z $_line ]] && { _cur_pci=""; _cur_keep=false; }
-      fi
-    fi
   done <<<"$lspci_all"
   if [[ -n $_cur_pci && -n $_cur_line && $_cur_keep == true ]]; then
     GPU_PCI+=("$_cur_pci"); GPU_DRV+=("$_cur_drv"); GPU_LINE+=("$_cur_line")
@@ -176,39 +166,76 @@ QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1"
 else
   env_body="# no GPU hwaccel detected -> CPU decode (Qt default)"
 fi
+mkdir -p "$PLUGIN_ROOT"
 printf '%s\n' "$env_body" > "$ENV_FILE"
 
 # --- log ---------------------------------------------------------------------
-log "video-hwaccel: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-if [[ ${#GPU_PCI[@]} -gt 0 ]]; then
-  log "  GPUs detected:"
-  for i in "${!GPU_PCI[@]}"; do
-    v="$(classify "${GPU_LINE[$i]}")"
-    drv="${GPU_DRV[$i]:-<none>}"
-    node="${PCI_NODE[${GPU_PCI[$i]}]:-<no render node>}"
-    log "    ${GPU_PCI[$i]}  ${v}  driver=${drv}  node=${node}"
-  done
-else
-  log "  GPUs detected: none (lspci unavailable or no display GPU)"
-fi
-log "  backend:     ${backend}"
-log "  gpu family:  ${gpu}"
-log "  render node: ${render_node:-n/a}"
-log "  env file:    ${ENV_FILE}"
-log "  env vars:"
-sed 's/^/      /' <<<"$env_body"
-if [[ $backend == "vaapi" ]]; then
-  _n_nodes=0
-  [[ -n $render_nodes ]] && _n_nodes="$(grep -c . <<<"$render_nodes")"
-  if [[ $_n_nodes -gt 1 ]]; then
-    log ""
-    log "  NOTE: multiple render nodes (hybrid iGPU+dGPU). The Qt FFmpeg backend"
-    log "        cannot be pinned to a node, so VAAPI uses the session default"
-    log "        node. The GPUs above show which node belongs to which chip."
+mkdir -p "$(dirname "$LOG_FILE")"
+{
+  echo "video-hwaccel: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [[ ${#GPU_PCI[@]} -gt 0 ]]; then
+    echo "  GPUs detected:"
+    for i in "${!GPU_PCI[@]}"; do
+      v="$(classify "${GPU_LINE[$i]}")"
+      drv="${GPU_DRV[$i]:-<none>}"
+      node="${PCI_NODE[${GPU_PCI[$i]}]:-<no render node>}"
+      echo "    ${GPU_PCI[$i]}  ${v}  driver=${drv}  node=${node}"
+    done
+  else
+    echo "  GPUs detected: none (lspci unavailable or no display GPU)"
   fi
+  echo "  backend:     ${backend}"
+  echo "  gpu family:  ${gpu}"
+  echo "  render node: ${render_node:-n/a}"
+  echo "  env file:    ${ENV_FILE}"
+  echo "  env vars:"
+  sed 's/^/      /' <<<"$env_body"
+  if [[ $backend == "vaapi" ]]; then
+    _n_nodes=0
+    [[ -n $render_nodes ]] && _n_nodes="$(grep -c . <<<"$render_nodes")"
+    if [[ $_n_nodes -gt 1 ]]; then
+      echo ""
+      echo "  NOTE: multiple render nodes (hybrid iGPU+dGPU). The Qt FFmpeg backend"
+      echo "        cannot be pinned to a node, so VAAPI uses the session default"
+      echo "        node. The GPUs above show which node belongs to which chip."
+    fi
+  fi
+} >> "$LOG_FILE"
+
+# --- apply mode: systemd-user drop-in on the WM session template --------------
+apply_dropin() {
+  # Only meaningful when we actually have something to force.
+  if [[ $backend == "cpu" ]]; then
+    echo "video-hwaccel: no GPU hwaccel detected; nothing to apply (CPU decode)."
+    return 0
+  fi
+  local wm_unit
+  wm_unit="$(systemctl --user list-unit-files 2>/dev/null | awk '{print $1}' | grep -E '^wayland-wm@' | head -1 || true)"
+  if [[ -z $wm_unit ]]; then
+    echo "video-hwaccel: WARNING: no wayland-wm@*.service found in user units."
+    echo "  The session env will NOT be updated automatically. Manual fallback:"
+    echo "    export QT_FFMPEG_DECODING_HW_DEVICE_TYPES=${backend}"
+    [[ $backend == vaapi ]] && echo "    export QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1"
+    echo "  (add to your WM autostart / session env), then restart the session."
+    return 1
+  fi
+  mkdir -p "$DROPIN_DIR"
+  {
+    echo "# Managed by p3lu.video-background (bin/video-hwaccel.sh --apply)."
+    echo "# Injects Qt FFmpeg hardware-decode settings into the WM session so"
+    echo "# quickshell (video wallpaper) decodes on the GPU. Idempotent."
+    echo "[Service]"
+    echo "EnvironmentFile=-${ENV_FILE}"
+  } > "$DROPIN_FILE"
+  systemctl --user daemon-reload
+  echo "video-hwaccel: drop-in written to $DROPIN_FILE"
+  echo "video-hwaccel: daemon-reloaded. Takes effect at next session restart"
+  echo "video-hwaccel: (log out / in, or: systemctl --user restart '${wm_unit}')."
+  echo "video-hwaccel: current session is unaffected (it already has its env)."
+}
+
+if [[ ${1:-} == "--apply" ]]; then
+  apply_dropin
 fi
-log ""
-log "  STATUS: phase 1 = detection only; env NOT yet applied to the session."
-log "          (run 'video-hwaccel.sh --apply' once phase 2 lands.)"
 
 exit 0

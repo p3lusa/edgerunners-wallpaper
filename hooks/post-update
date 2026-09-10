@@ -1,11 +1,12 @@
 #!/bin/bash
 # Re-assert the video-wallpaper plugin state after `omarchy update`.
 #
-# Desired state while the video-wallpaper theme is active:
-#   p3lu.video-background enabled, omarchy.background disabled.
-# No-op when the theme or plugin is absent, when another theme is active,
-# or when the state already matches — so it never fights a deliberate
-# user change for other themes.
+# Two concerns, both idempotent and "never fight a deliberate change":
+#   1. While the video-wallpaper theme is the active one, keep
+#      p3lu.video-background enabled and omarchy.background disabled.
+#   2. (Re)apply GPU video-decode acceleration for whatever GPU this machine
+#      has, so the wallpaper decodes on the GPU, not the CPU.
+# No-op (for the parts that don't apply) when the theme/plugin is absent.
 
 set -euo pipefail
 
@@ -14,17 +15,25 @@ PLUGIN_DIR="$HOME/.config/omarchy/plugins/p3lu.video-background"
 SHELL_JSON="$HOME/.config/omarchy/shell.json"
 THEME_NAME_FILE="$HOME/.local/state/omarchy/current/theme.name"
 
-[[ -d $THEME_DIR && -d $PLUGIN_DIR && -f $SHELL_JSON ]] || exit 0
-
-# Only re-assert while the video-wallpaper theme is the active one.
-[[ "$(cat "$THEME_NAME_FILE" 2>/dev/null || true)" == "video-wallpaper" ]] || exit 0
+[[ -d $PLUGIN_DIR && -f $SHELL_JSON ]] || exit 0
 
 video_on=$(jq -r '[.plugins[]?.id // empty] | index("p3lu.video-background")' "$SHELL_JSON" 2>/dev/null || echo null)
-stock_off=$(jq -r '.disabledPlugins[]? | select(. == "omarchy.background")' "$SHELL_JSON" 2>/dev/null || echo "")
 
-if [[ "$video_on" != "null" && -n "$stock_off" ]]; then
-  exit 0 # already in the desired state
+# 1) Re-assert enable/disable state while the video-wallpaper theme is active.
+if [[ -d $THEME_DIR && "$(cat "$THEME_NAME_FILE" 2>/dev/null || true)" == "video-wallpaper" ]]; then
+  stock_off=$(jq -r '.disabledPlugins[]? | select(. == "omarchy.background")' "$SHELL_JSON" 2>/dev/null || echo "")
+  if [[ "$video_on" == "null" || -z $stock_off ]]; then
+    omarchy plugin enable p3lu.video-background
+    omarchy plugin disable omarchy.background
+  fi
 fi
 
-omarchy plugin enable p3lu.video-background
-omarchy plugin disable omarchy.background
+# 2) (Re)apply GPU decode acceleration while the plugin is active. This is
+#    cheap and idempotent: it detects the GPU, writes hwaccel.env, and keeps a
+#    systemd-user drop-in on the WM session up to date. No-op with a message
+#    when no GPU hwaccel is available (CPU decode).
+if [[ "$video_on" != "null" && -x "$PLUGIN_DIR/bin/video-hwaccel.sh" ]]; then
+  "$PLUGIN_DIR/bin/video-hwaccel.sh" --apply || true
+fi
+
+exit 0
