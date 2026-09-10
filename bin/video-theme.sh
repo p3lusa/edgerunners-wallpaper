@@ -6,7 +6,7 @@
 # the clip is installed as the theme's looping video wallpaper.
 #
 # Usage:
-#   video-theme.sh <clip.mp4> [theme-name]
+#   video-theme.sh [--no-activate] <clip.mp4> [theme-name]
 #
 # Example:
 #   video-theme.sh ~/Videos/aurora.mp4            # theme "video-aurora"
@@ -39,8 +39,14 @@ set -euo pipefail
 # Keep the theme menu clean (idempotent, silent).
 "$(dirname "${BASH_SOURCE[0]}")/video-menu.sh" --add --quiet || true
 
+no_activate=""
+if [[ ${1:-} == "--no-activate" ]]; then
+  no_activate=1
+  shift
+fi
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "Usage: $(basename "$0") <clip.mp4> [theme-name]" >&2
+  echo "Usage: $(basename "$0") [--no-activate] <clip.mp4> [theme-name]" >&2
   exit 2
 fi
 
@@ -130,10 +136,14 @@ if [[ -n "$poster_file" ]]; then
   mv "$poster_file" "${theme_src}/backgrounds/${clip_base}.png"
 fi
 
-# --- 4. activate ---------------------------------------------------------------------
-if ! omarchy theme set "$name"; then
-  echo "error: omarchy theme set $name failed" >&2
-  exit 1
+# --- 4. activate (skippable: --no-activate keeps the current wallpaper) -------------
+if [[ -n $no_activate ]]; then
+  echo "skipping activation (--no-activate); current wallpaper unchanged."
+else
+  if ! omarchy theme set "$name"; then
+    echo "error: omarchy theme set $name failed" >&2
+    exit 1
+  fi
 fi
 
 # --- 5. register in the video-theme cycle ----------------------------------------
@@ -145,7 +155,11 @@ if ! grep -qxF "$name" "$cycle_list" 2>/dev/null; then
 fi
 
 echo
-echo "Theme '$name' is active."
+if [[ -n $no_activate ]]; then
+  echo "Theme '$name' created (not activated)."
+else
+  echo "Theme '$name' is active."
+fi
 echo "  source: $theme_src"
 echo "  video : videos/$(basename "$clip")"
 echo "  cycle : video-next / video-prev (registered in $cycle_list)"

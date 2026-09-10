@@ -51,6 +51,24 @@ if [[ -n $CURRENT_BG ]]; then
   CUR_BASE="${CUR_BASE%.*}"
 fi
 
+# paired_clip_exists <theme_dir> [exclude-base] — true if the theme has at
+# least one clip whose video is paired with a poster (backgrounds/<base>.png
+# + videos/<base>.mp4). Same criterion the plugin (and video-cycle.sh /
+# video-switcher.sh) use to decide what can actually play. exclude-base is
+# the clip currently being removed: the check must evaluate the theme as it
+# will look AFTER the removal, so that clip's pairing doesn't count.
+paired_clip_exists() {
+  local tdir=$1 ex=${2:-} base
+  [[ -d "$tdir/videos" && -d "$tdir/backgrounds" ]] || return 1
+  for poster in "$tdir"/backgrounds/*; do
+    [[ -f $poster ]] || continue
+    base="${poster##*/}"; base="${base%.*}"
+    [[ $base == "$ex" ]] && continue
+    [[ -f "$tdir/videos/$base.mp4" ]] && return 0
+  done
+  return 1
+}
+
 # --- protect the active state --------------------------------------------------
 # If the playing background is the clip being removed, move elsewhere first.
 if [[ $CUR_BASE == "$name" ]]; then
@@ -59,13 +77,25 @@ if [[ $CUR_BASE == "$name" ]]; then
     fallback=""
     if [[ -d "$USER_THEMES/video-wallpaper/videos" ]] && \
        [[ -n $(find "$USER_THEMES/video-wallpaper/videos" -name '*.mp4' ! -name "$name.mp4" 2>/dev/null | head -1) ]]; then
-      fallback="video-wallpaper"
+      # only fall back to video-wallpaper if a remaining clip is still
+      # paired with a poster (unpaired clips don't play)
+      if paired_clip_exists "$USER_THEMES/video-wallpaper" "$name"; then
+        fallback="video-wallpaper"
+      else
+        for tdir in "$USER_THEMES"/*/; do
+          t="${tdir%/}"; t="${t##*/}"
+          [[ $t == "video-$name" ]] && continue
+          if paired_clip_exists "$tdir" "$name"; then
+            fallback="$t"
+            break
+          fi
+        done
+      fi
     else
       for tdir in "$USER_THEMES"/*/; do
         t="${tdir%/}"; t="${t##*/}"
         [[ $t == "video-$name" ]] && continue
-        if [[ -d "${tdir}videos" ]] && \
-           [[ -n $(find "${tdir}videos" -name '*.mp4' 2>/dev/null | head -1) ]]; then
+        if paired_clip_exists "$tdir" "$name"; then
           fallback="$t"
           break
         fi

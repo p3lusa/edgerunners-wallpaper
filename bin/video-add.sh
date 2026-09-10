@@ -12,7 +12,7 @@
 # file before adding if you want a different name.
 #
 # Usage:
-#   video-add.sh [--strip-audio] <clip>
+#   video-add.sh [--strip-audio] [--no-activate] <clip>
 
 set -euo pipefail
 
@@ -22,13 +22,18 @@ LIBRARY_THEME="video-wallpaper"
 TMP_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/video-add"
 
 strip_audio=""
-if [[ ${1:-} == "--strip-audio" ]]; then
-  strip_audio="-an"
+no_activate=""
+while [[ ${1:-} == --* ]]; do
+  case "$1" in
+    --strip-audio) strip_audio="-an" ;;
+    --no-activate) no_activate="--no-activate" ;;
+    *) echo "error: unknown option: $1" >&2; exit 2 ;;
+  esac
   shift
-fi
+done
 
 if [[ $# -ne 1 || ! -f ${1:-} ]]; then
-  echo "Usage: $(basename "$0") [--strip-audio] <clip>" >&2
+  echo "Usage: $(basename "$0") [--strip-audio] [--no-activate] <clip>" >&2
   echo "       the clip name becomes the video name (rename the file first)." >&2
   exit 2
 fi
@@ -76,9 +81,9 @@ for tdir in "$USER_THEMES"/*/; do
   fi
 done
 
-# --- create the per-clip theme (Aether palette, activates it) ----------------
+# --- create the per-clip theme (Aether palette) --------------------------------
 echo "creating per-clip theme video-$name (Aether)…"
-"$PLUGIN_BIN/video-theme.sh" "$clip" "video-$name"
+"$PLUGIN_BIN/video-theme.sh" $no_activate "$clip" "video-$name"
 
 # --- mirror into the library theme (hardlinks, zero extra space) -------------
 lib="$USER_THEMES/$LIBRARY_THEME"
@@ -91,4 +96,8 @@ else
   echo "note: library theme '$LIBRARY_THEME' not found; skipped the mirror."
 fi
 
-echo "done: video-$name is active. Cycle: Super+Ctrl+Alt+Left/Right."
+if [[ -n $no_activate ]]; then
+  echo "done: video-$name added (not activated — play it from the TUI)."
+else
+  echo "done: video-$name is active. Cycle: Super+Ctrl+Alt+Left/Right."
+fi

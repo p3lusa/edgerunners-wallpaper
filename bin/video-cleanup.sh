@@ -58,3 +58,20 @@ if [[ -f $list ]]; then
   done <"$list"
   mv "$tmp" "$list"
 fi
+
+# Prune orphaned .meta caches: video-manage.sh caches ffprobe metadata per
+# clip ($META_DIR/<clipbase>.meta); removing a clip leaves the file behind.
+# Inoffensive, but keep the cache honest.
+META_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/omarchy/video-manage/meta"
+for meta in "$META_DIR"/*.meta; do
+  [[ -f $meta ]] || continue
+  n="${meta##*/}"; n="${n%.meta}"
+  found=""
+  for tdir in "$USER_THEMES"/*/ "${OMARCHY_PATH:-/usr/share/omarchy}/themes"/*/; do
+    if [[ -f "${tdir}videos/$n.mp4" ]]; then
+      found=1
+      break
+    fi
+  done
+  [[ -n $found ]] || rm -f "$meta"
+done
