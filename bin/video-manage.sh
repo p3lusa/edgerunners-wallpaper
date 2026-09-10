@@ -4,9 +4,18 @@
 # Stack (Charm best practice for shell TUIs, zero extra deps on an
 # Omarchy system):
 #   fzf  — list engine: fuzzy filter, preview pane, themed border,
-#          custom keys
+#          custom keys, hero header + persistent footer
 #   gum  — modals: file picker, confirm, spinner (themed by the active
 #          palette via GUM_* env vars)
+#
+# Layout (variant A — "hero header"):
+#   ┌ ▸ AHORA SUENA · <clip that is playing now> ┐   (fzf --header)
+#   │  === LIBRERÍA (n)  <rich, aligned rows>     │   (fzf sections)
+#   │  === ACCIONES    add / remove / help        │
+#   ├ filter prompt ────────────────────────────────
+#   │ footer: key hints + last-action feedback    │   (fzf --footer)
+#   preview pane (right 1/3): poster thumbnail (kitty protocol, or
+#   chafa→sixel when chafa is installed) + metadata card + action hints.
 #
 # Keys: Enter play · r remove · a add · ? help · q/Esc quit
 set -euo pipefail
@@ -31,8 +40,10 @@ col() { local h=${1##'#'}; shift
     $((16#${h:0:2})) $((16#${h:2:2})) $((16#${h:4:2})) "$*"
 }
 # strip ANSI escapes from stdin
-strip_ansi() { sed -e 's/\x1b\[[0-9;]*m//g'; }
-export -f col strip_ansi
+strip_ansi() { sed -e 's/\x1b\[[0-9;]*[mM]//g'; }
+# pad <width> <text> — right-pad with spaces (visual width ≈ char count)
+pad() { local w=$1 t=$2; printf '%-*s' "$w" "$t"; }
+export -f col strip_ansi pad
 
 # Palette of the *currently staged* theme. Re-read every loop iteration so
 # the TUI re-themes itself when a per-clip palette is applied.
@@ -111,7 +122,8 @@ current_state() {
 
 # ffprobe metadata, cached per clip (invalidated by mtime).
 clip_meta() { # <file> → "20s · 1920x1080@30fps · 12.3 MB"
-  local file=$1 m="$META_DIR/$(basename "$file" .mp4).meta"
+  local file=$1
+  local m="$META_DIR/$(basename "$file" .mp4).meta"
   if [[ ! -f $m || $file -nt $m ]]; then
     local out w h rate dur size fps dur_s size_mb
     out=$(ffprobe -v error -select_streams v:0 \
@@ -131,51 +143,184 @@ export -f clip_meta
 export META_DIR
 
 # ------------------------------------------------------------- list/preview ----
-# clip line format:  "MARK NAME  [tag]"   (MARK = ● or two spaces)
+# Row layout:  MARK NAME<24> TAG<12> META
+#   MARK = ●  (playing) or two spaces
+# MARKW=2  NAMEW=24  TAGW=12
+readonly MARKW=2 NAMEW=24 TAGW=12
+
+# line_to_name — strip MARK + trailing tag/meta → bare clip name.
+# fzf already returns the plain (ANSI-stripped) line, but strip again for
+# safety; then drop the leading 2-char mark, trim, and cut at the tag.
 line_to_name() {
-  sed -E 's/^.{2}//; s/  \[[^]]*\]$//' <<<"$1"
+  local p
+  p=$(strip_ansi <<<"$1")
+  p=${p:2}                       # drop MARK ("● " or "  ")
+  p="${p#"${p%%[![:space:]]*}"}" # ltrim
+  p=${p%%[[:space:]]\[*}         # cut at the " [tag]"/meta boundary
+  p="${p%"${p##*[![:space:]]}"}" # rtrim
+  printf '%s' "$p"
 }
 export -f line_to_name
 export SESSION
 
 tag_for() { [[ $1 == own ]] && echo "own palette" || echo "library"; }
 
-render_clip() { # <name> <theme> <kind>
-  local name=$1 theme=$2 kind=$3 tag
-  tag=$(tag_for "$kind")
-  if [[ $name == "$CUR_BASE" && $theme == "$CUR_THEME" ]]; then
-    printf '%s %s %s\n' \
-      "$(col "$ACC" "$I_DOT ")" "$(col "$ACC" "$name")" \
-      "$(col "$MUT" "[$tag]")"
+# poster path for a clip (name → theme dir → backgrounds/<base>.png|jpg|..)
+poster_for() { # <name> → path or ""
+  local name=$1 row base theme f kind tdir c
+  row=$(grep -P "^\Q${name}\E	" "$SESSION/library.tsv" 2>/dev/null | head -1) || true
+  [[ -z $row ]] && return 0
+  # columns: name 	 theme 	 file 	 kind
+  IFS=$'	' read -r base theme f kind <<<"$row"
+  # derive the theme dir from the video file path: .../<theme>/videos/<base>.mp4
+  tdir=$(dirname "$(dirname "$f")")
+  for c in "$tdir/backgrounds/$base.png" "$tdir/backgrounds/$base.jpg" \
+           "$tdir/backgrounds/$base.jpeg" "$tdir/backgrounds/$base.webp"; do
+    [[ -f $c ]] && { printf '%s' "$c"; return 0; }
+  done
+  return 0
+}
+export -f poster_for
+
+# Detect image protocol once: kitty (zero-dep), else chafa→sixel, else none.
+detect_img_proto() {
+  if [[ -n ${KITTY_WINDOW_ID:-} ]]; then
+    IMG_PROTO=kitty
+  elif command -v chafa >/dev/null 2>&1; then
+    IMG_PROTO=sixel
   else
-    printf '%s %s %s\n' \
-      "$(col "$MUT" "  ")" "$(col "$TXT" "$name")" \
-      "$(col "$MUT" "[$tag]")"
+    IMG_PROTO=none
+  fi
+  export IMG_PROTO
+}
+
+# Render the poster for a clip into the preview pane (stdout). No-op to the
+# text card when there is no image protocol or no poster. Output is cached in
+# $SESSION/poster-<base>.img and regenerated only when the poster changes.
+render_poster() { # <name>
+  local name=$1 p cache w h
+  p=$(poster_for "$name")
+  [[ -z $p || -z $IMG_PROTO || $IMG_PROTO == none ]] && return 0
+  cache="$SESSION/poster-$(basename "$p" .*)"
+  if [[ ! -f $cache || $p -nt $cache ]]; then
+    local out=""
+    case $IMG_PROTO in
+      kitty)
+        # downscale with ffmpeg (always present) → lossy PNG → kitty sequence
+        local tmp="$SESSION/thumb.png"
+        if ffmpeg -v error -y -i "$p" -vf "scale=220:-2" "$tmp" 2>/dev/null; then
+          local b64
+          b64=$(base64 -w0 "$tmp")
+          printf -v out '\033_Ga=100;t=0;q=100;m=0;f=100;w=220 %s\033\\' "$b64"
+        fi
+        ;;
+      sixel)
+        out=$(chafa --format sixel --width 28 -- "$p" 2>/dev/null) || out=""
+        ;;
+    esac
+    if [[ -n $out ]]; then
+      printf '%s\n' "$out" > "$cache"
+    else
+      rm -f "$cache"
+      return 0
+    fi
+  fi
+  cat "$cache"
+}
+export -f render_poster
+
+# build a rich, aligned clip row.
+render_clip() { # <name> <theme> <file> <kind>
+  local name=$1 theme=$2 file=$3 kind=$4 tag mark meta
+  tag=$(tag_for "$kind")
+  meta=$(clip_meta "$file")
+  if [[ $name == "$CUR_BASE" && $theme == "$CUR_THEME" ]]; then
+    mark=$(col "$ACC" "● ")
+    printf '%s %s %s %s\n' \
+      "$mark" "$(col "$ACC" "$(pad "$NAMEW" "$name")")" \
+      "$(col "$ACC" "$(pad "$TAGW" "[$tag]")")" \
+      "$(col "$MUT" "$meta")"
+  else
+    mark="  "
+    printf '%s %s %s %s\n' \
+      "$mark" "$(col "$TXT" "$(pad "$NAMEW" "$name")")" \
+      "$(col "$MUT" "$(pad "$TAGW" "[$tag]")")" \
+      "$(col "$MUT" "$meta")"
   fi
 }
 export -f render_clip tag_for
 
+# row_file <name> → video path (for meta lookup)
+row_file() {
+  local row
+  row=$(grep -P "^\Q${1}\E\t" "$SESSION/library.tsv" 2>/dev/null | head -1) || true
+  [[ -z $row ]] && return 0
+  IFS=$'	' read -r _ _ f _ <<<"$row"
+  printf '%s' "$f"
+}
+export -f row_file
+
+# section header line (fzf treats a leading "=== " as a section divider)
+section_hdr() { # <text>
+  printf '=== %s\n' "$(col "$MUT" "$1")"
+}
+export -f section_hdr
+
 build_list() {
-  local name theme file kind
-  {
-    printf '%s %s\n' "$(col "$ACC" "$I_ADD  ")" "Add a video"
-    printf '%s %s\n' "$(col "$MUT" "$I_RM   ")" "Remove a video"
-    printf '%s %s\n' "$(col "$MUT" "$I_HELP ")" "How to use"
-    while IFS=$'\t' read -r name theme file kind; do
-      render_clip "$name" "$theme" "$kind"
-    done < "$SESSION/library.tsv"
-  }
+  local name theme file kind n
+  n=$(wc -l < "$SESSION/library.tsv")
+  section_hdr "LIBRERÍA ($n)"
+  while IFS=$'	' read -r name theme file kind; do
+    render_clip "$name" "$theme" "$file" "$kind"
+  done < "$SESSION/library.tsv"
+  section_hdr "ACCIONES"
+  printf '%s\n' "$(col "$ACC" "$I_ADD  ")$(col "$TXT" "Add a video")"
+  printf '%s\n' "$(col "$MUT" "$I_RM   ")$(col "$TXT" "Remove a video")"
+  printf '%s\n' "$(col "$MUT" "$I_HELP ")$(col "$TXT" "How to use")"
 }
 
 build_clips_only() {
   local name theme file kind
-  while IFS=$'\t' read -r name theme file kind; do
-    render_clip "$name" "$theme" "$kind"
+  while IFS=$'	' read -r name theme file kind; do
+    render_clip "$name" "$theme" "$file" "$kind"
   done < "$SESSION/library.tsv"
 }
 
-# preview pane (right 1/3). Also records the highlighted line in $SESSION/hl
-# (state hook for the 'r' key).
+# hero header (fzf --header): the clip that is playing right now.
+build_hero() {
+  local line1 line2
+  line1="$(col "$ACC" "▸ AHORA SUENA")"
+  if [[ -n $CUR_BASE && $CUR_BASE != "?" ]]; then
+    local row meta
+    row=$(grep -P "^\Q${CUR_BASE}\E\t" "$SESSION/library.tsv" 2>/dev/null | head -1) || true
+    if [[ -n $row ]]; then
+      IFS=$'	' read -r _ _ f kind <<<"$row"
+      meta=$(clip_meta "$f")
+      line2="$(col "$ACC" "  ● ")$(col "$TXT" "$(pad 26 "$CUR_BASE")")$(col "$MUT" "  $(tag_for "$kind")  $meta")"
+    else
+      line2="$(col "$ACC" "  ● ")$(col "$TXT" "$CUR_BASE")$(col "$MUT" "  theme: $CUR_THEME")"
+    fi
+  else
+    line2="$(col "$MUT" "  (none) · $n clips in library")"
+  fi
+  printf '%s\n%s' "$line1" "$line2"
+}
+export -f build_hero
+
+# footer (fzf --footer): one line — key hints, with last-action feedback
+# prepended when present.
+build_footer() {
+  local hints
+  hints="$(col "$MUT" "a") $(col "$TXT" "add") · $(col "$MUT" "r") $(col "$TXT" "remove") · $(col "$MUT" "enter") $(col "$TXT" "play") · $(col "$MUT" "?") $(col "$TXT" "help") · $(col "$MUT" "q") $(col "$TXT" "quit")"
+  if [[ -n ${FEEDBACK:-} ]]; then
+    printf '%s   %s' "$(col "$ACC" "$FEEDBACK")" "$hints"
+  else
+    printf '%s' "$hints"
+  fi
+}
+export -f build_footer
+
+# preview pane (right 1/3): poster + metadata card + action hints.
 preview_cmd() {
   local line plain name row theme file kind status rule
   line=$1
@@ -213,21 +358,25 @@ preview_cmd() {
         "  up/down or j/k  move · type to filter"
       return ;;
   esac
+  # section divider line → show nothing
+  [[ $plain == "==="* ]] && return 0
   name=$(line_to_name "$plain")
   row=$(grep -P "^\Q${name}\E\t" "$SESSION/library.tsv" 2>/dev/null | head -1) || true
   if [[ -z $row ]]; then
     printf 'unknown: %s\n' "$name"; return
   fi
-  IFS=$'\t' read -r name theme file kind <<<"$row"
+  IFS=$'	' read -r name theme file kind <<<"$row"
   status="idle"
   [[ $name == "$CUR_BASE" && $theme == "$CUR_THEME" ]] && status="PLAYING"
-  printf '%s\n' "$name" "$rule" "" \
+  # poster (image) when the terminal can show it
+  render_poster "$name"
+  printf '%s\n' "" "$name" "$rule" "" \
     "theme     $theme" \
     "kind      $(tag_for "$kind")" \
-    "status    $status" \
+    "status    $(col "$ACC" "$status")" \
     "media     $(clip_meta "$file")" \
     "" \
-    "Enter → play · r → remove"
+    "$(col "$MUT" "Enter → play · r → remove")"
 }
 export -f preview_cmd
 
@@ -236,7 +385,7 @@ do_play() { # <name>
   local name=$1 row theme file
   row=$(grep -P "^\Q${name}\E\t" "$SESSION/library.tsv" 2>/dev/null | head -1) || true
   [[ -z $row ]] && return 1
-  IFS=$'\t' read -r _ theme file _ <<<"$row"
+  IFS=$'	' read -r _ theme file _ <<<"$row"
   if [[ $theme == "$CUR_THEME" ]]; then
     omarchy theme bg set "$file"
   else
@@ -268,8 +417,7 @@ do_add() {
       return 0
     fi
   fi
-  # --no-activate: adding must not yank the current wallpaper (the user can
-  # play the new clip with Enter when they want).
+  # --no-activate: adding must not yank the current wallpaper.
   if gum spin --spinner dot --title "creating theme (Aether + library mirror)" \
        --show-output -- "$PLUGIN_BIN/video-add.sh" $strip --no-activate "$f" 2>&1; then
     FEEDBACK="added $name"
@@ -292,12 +440,11 @@ do_remove() { # <name>
 }
 
 # Picker used both by the "Remove a video" entry and the 'r' key: lists only
-# clips (with preview), the user chooses, then do_remove confirms. No
-# dependency on the preview's highlight state.
+# clips (with preview), the user chooses, then do_remove confirms.
 remove_picker() {
   local pick
   pick=$(build_clips_only | fzf \
-      --height "90%" --border \
+      --height "90%" --border --no-scrollbar \
       --border-label " select a video to remove " --border-label-pos 3 \
       --prompt "  " --ansi \
       --preview "preview_cmd {}" \
@@ -349,22 +496,21 @@ EOF
 
 # ------------------------------------------------------------------- main ----
 fzf_colors() {
-  # truecolor scheme from the active palette (fzf wants #RRGGBB)
   printf 'fg:#%s,bg:#%s,fg+:#%s,header:#%s,info:#%s,query:#%s,pointer:#%s,marker:#%s,prompt:#%s,border:#%s' \
     "${TXT#'#'}" "${BG#'#'}" "${ACC#'#'}" "${ACC#'#'}" "${MUT#'#'}" "${ACC#'#'}" "${ACC#'#'}" "${ACC#'#'}" "${ACC#'#'}" "${ACC#'#'}"
 }
 
 main() {
-  local FEEDBACK="" out rc action
+  local FEEDBACK="" out rc action n
+  detect_img_proto
   while true; do
     load_palette
     declare_icons
     scan_library
     current_state
-    local n; n=$(wc -l < "$SESSION/library.tsv")
+    n=$(wc -l < "$SESSION/library.tsv")
 
     local label=" $I_FILM  video library · $n clips · theme: $CUR_THEME"
-    [[ -n $FEEDBACK ]] && label="  $FEEDBACK    $label"
 
     rm -f "$SESSION/action"
     rc=0
@@ -375,6 +521,8 @@ main() {
         --border-label-pos 3 \
         --prompt "filter: " \
         --ansi \
+        --header "$(build_hero)" \
+        --footer "$(build_footer)" \
         --preview "preview_cmd {}" \
         --preview-window "right:33%,border-rounded" \
         --bind "a:execute-silent(echo ADD > $SESSION/action)+abort" \
@@ -404,10 +552,12 @@ main() {
     fi
     FEEDBACK=""
 
-    case $out in
+    local plain; plain=$(strip_ansi <<<"$out")
+    case $plain in
       *"Add a video"*) do_add ;;
       *"Remove a video"*) remove_picker ;;
       *"How to use"*) show_help ;;
+      "==="*) : ;;   # section divider selected → ignore
       *)
         do_play "$(line_to_name "$out")" || true
         ;;

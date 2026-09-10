@@ -58,7 +58,11 @@ if [[ -n $need_tmp ]]; then
   mkdir -p "$TMP_DIR"
   out="$TMP_DIR/$name.mp4"
   rm -f "$out"
-  if ! ffmpeg -v error -y -i "$clip" -c:v copy $strip_audio "$out"; then
+  # -an only when stripping audio; build as an array so the (empty) case
+  # doesn't leave an unquoted expansion in a command.
+  ffmpeg_args=(-v error -y -i "$clip" -c:v copy)
+  [[ -n $strip_audio ]] && ffmpeg_args+=(-an)
+  if ! ffmpeg "${ffmpeg_args[@]}" "$out"; then
     rm -f "$out"
     echo "error: could not remux '$base' (re-encode it to H.264/.mp4 first)." >&2
     exit 1
@@ -83,12 +87,16 @@ done
 
 # --- create the per-clip theme (Aether palette) --------------------------------
 echo "creating per-clip theme video-$name (Aether)…"
-"$PLUGIN_BIN/video-theme.sh" $no_activate "$clip" "video-$name"
+if [[ -n $no_activate ]]; then
+  "$PLUGIN_BIN/video-theme.sh" --no-activate "$clip" "video-$name"
+else
+  "$PLUGIN_BIN/video-theme.sh" "$clip" "video-$name"
+fi
 
 # --- mirror into the library theme (hardlinks, zero extra space) -------------
 lib="$USER_THEMES/$LIBRARY_THEME"
 if [[ -d $lib ]]; then
-  mkdir -p "$lib/videos"
+  mkdir -p "$lib/videos" "$lib/backgrounds"
   ln -f "$USER_THEMES/video-$name/videos/$name.mp4" "$lib/videos/$name.mp4"
   ln -f "$USER_THEMES/video-$name/backgrounds/$name.png" "$lib/backgrounds/$name.png"
   echo "mirrored into $LIBRARY_THEME (hardlinks)."

@@ -131,7 +131,7 @@ if [[ -z $staged_bg || ! -f $staged_bg ]]; then
   staged_theme="$HOME/.local/state/omarchy/current/theme"
   first_bg="$(find "$staged_theme/backgrounds" -type f 2>/dev/null | sort | head -1)"
   if [[ -n $first_bg ]]; then
-    omarchy-theme-bg-set "$first_bg" >/dev/null 2>&1 || true
+    omarchy theme bg set "$first_bg" >/dev/null 2>&1 || true
   else
     # the active theme has no backgrounds left: switch to one that does
     for tdir in "$USER_THEMES"/*/; do
