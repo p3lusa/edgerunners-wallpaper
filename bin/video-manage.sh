@@ -196,28 +196,39 @@ detect_img_proto() {
 
 # Render the poster for a clip into the preview pane (stdout). No-op to the
 # text card when there is no image protocol or no poster. Output is cached in
-# $SESSION/poster-<base>.img and regenerated only when the poster changes.
+# $SESSION/poster-<base>-<w>.img and regenerated only when the poster or the
+# target width changes.
 render_poster() { # <name>
-  local name=$1 p cache w h
+  local name=$1 p cache w cols
   p=$(poster_for "$name")
   [[ -z $p || -z $IMG_PROTO || $IMG_PROTO == none ]] && return 0
-  cache="$SESSION/poster-$(basename "$p" .*)"
+  # Dynamic target width: the preview pane is fzf's right 33%. Recomputed on
+  # every render (fzf re-runs the preview on focus, resize and redraw), so
+  # the poster follows the terminal size — tiling layout and fullscreen.
+  # ~8 px per cell is the common monospace default; clamped to sane bounds.
+  cols=$(tput cols 2>/dev/null) || cols=80
+  (( cols < 40 )) && cols=40
+  w=$(( cols / 3 * 8 ))
+  (( w > 720 )) && w=720
+  (( w < 160 )) && w=160
+  cache="$SESSION/poster-$(basename "$p" .*)-$w.img"
   if [[ ! -f $cache || $p -nt $cache ]]; then
     local out=""
     case $IMG_PROTO in
       kitty)
         # downscale with ffmpeg (always present) -> lossy PNG -> kitty sequence.
-        # Spec minimal form (kitty graphics protocol): a=T (transmit), f=100
-        # (PNG), m=0 (final chunk). One chunk is fine for a small thumbnail.
+        # Spec minimal form: a=T (transmit), f=100 (PNG), m=0 (final chunk),
+        # w=<px> (display width = the preview pane). One chunk is fine for a
+        # small thumbnail.
         local tmp="$SESSION/thumb.png"
-        if ffmpeg -v error -y -i "$p" -vf "scale=220:-2" "$tmp" 2>/dev/null; then
+        if ffmpeg -v error -y -i "$p" -vf "scale=${w}:-2" "$tmp" 2>/dev/null; then
           local b64
           b64=$(base64 -w0 "$tmp")
-          printf -v out '\033_Ga=T,f=100,m=0;%s\033\\' "$b64"
+          printf -v out '\033_Ga=T,f=100,m=0,w=%s;%s\033\\' "$w" "$b64"
         fi
         ;;
       sixel)
-        out=$(chafa --format sixel --width 28 -- "$p" 2>/dev/null) || out=""
+        out=$(chafa --format sixel --width $(( cols / 3 )) -- "$p" 2>/dev/null) || out=""
         ;;
     esac
     if [[ -n $out ]]; then
@@ -227,6 +238,10 @@ render_poster() { # <name>
       return 0
     fi
   fi
+  # Kitty keeps image placements across redraws and on resize, so a stale
+  # poster (previous clip or a duplicate after a resize) lingers. Clear all
+  # visible placements before emitting the fresh one.
+  [[ $IMG_PROTO == kitty ]] && printf '\033_Ga=d\033\\'
   cat "$cache"
 }
 export -f render_poster
