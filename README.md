@@ -163,7 +163,7 @@ plugin moves):
 | `Super+Ctrl+Space` | **Wallpaper switcher (unified)** — takes over the stock wallpaper key. On video themes it opens the video switcher (a carousel of your whole video library with poster previews); on image themes it opens the stock background picker, exactly as before. Selecting a clip of the active theme switches the video (same palette); selecting a clip from another theme switches video + palette |
 | `Super+Ctrl+Alt+Left` | Previous video (cycles through the whole library) |
 | `Super+Ctrl+Alt+Right` | Next video (cycles through the whole library) |
-| `Super+Ctrl+Alt+W` | **Video library manager** (the `video-manage` TUI) — opens a terminal window with the full library UI: browse, play, add, remove. The window closes when you quit the TUI |
+| `Super+Ctrl+Alt+V` | **Video library manager** (the `video-manage` TUI) — opens a terminal window with the full library UI: browse, play, add, remove. The window closes when you quit the TUI |
 
 The unified picker is installed by unbinding the stock
 `Super+Ctrl+Space` (Hyprland Lua `hl.unbind`) and rebinding it to

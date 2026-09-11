@@ -59,7 +59,7 @@ hl.unbind("SUPER + CTRL + SPACE")
 o.bind("SUPER + CTRL + SPACE", "Wallpaper switcher", "$PLUGIN_BIN/video-bg-picker.sh")
 o.bind("SUPER + CTRL + ALT + LEFT", "Previous wallpaper video", "$PLUGIN_BIN/video-prev.sh")
 o.bind("SUPER + CTRL + ALT + RIGHT", "Next wallpaper video", "$PLUGIN_BIN/video-next.sh")
-o.bind("SUPER + CTRL + ALT + W", "Video library manager", "xdg-terminal-exec $PLUGIN_BIN/video-manage.sh")
+o.bind("SUPER + CTRL + ALT + V", "Video library manager", "xdg-terminal-exec $PLUGIN_BIN/video-manage.sh")
 EOF
 }
 
