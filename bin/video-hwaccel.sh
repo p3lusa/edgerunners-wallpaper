@@ -18,6 +18,19 @@
 #                   wayland-wm@.service template so the compositor session
 #                   (and quickshell within it) inherits the variables.
 #                   Idempotent: safe to run on every post-update.
+#   --status        show the effective config (auto vs override, backend,
+#                   env vars, drop-in state).
+#   --set-backend X force a backend (X = cuda | vaapi | cpu): writes a user
+#                   override file that bypasses auto-detection, then applies.
+#   --auto          remove the user override, re-run auto-detection + apply.
+#
+# USER OVERRIDE (escape hatch for a wrong auto-detection):
+#   $HOME/.config/omarchy/video-hwaccel.conf. If it exists, its KEY=VALUE
+#   lines replace the auto-detected env verbatim (a file created by
+#   --set-backend counts even when it holds no env lines, e.g. forced CPU).
+#   Edit it freely: any KEY=VALUE line is injected into the session. Remove
+#   it (or run --auto) to re-enable auto-detection. It lives outside the
+#   plugin directory on purpose, so it survives `omarchy plugin update`.
 #
 # Detection (see docs/PLAN-hwaccel-gpu.md):
 #   NVIDIA (dedicated)                 -> cuda   (NVDEC lives on the dGPU)
@@ -42,6 +55,9 @@ DRI_ROOT="${VIDEO_HWACCEL_DRI_ROOT:-/dev/dri}"
 WM_TEMPLATE="wayland-wm@.service"
 DROPIN_DIR="$HOME/.config/systemd/user/${WM_TEMPLATE}.d"
 DROPIN_FILE="$DROPIN_DIR/10-video-hwaccel.conf"
+# User override (escape hatch for wrong auto-detection). Lives OUTSIDE the
+# plugin directory so `omarchy plugin update` never clobbers it.
+OVERRIDE_FILE="$HOME/.config/omarchy/video-hwaccel.conf"
 
 # --- helpers -----------------------------------------------------------------
 lsmod_mods="$(lsmod 2>/dev/null | awk 'NR>0{print $1}' || true)"
@@ -157,15 +173,46 @@ if [[ -z $vendor ]]; then
   vendor="none"; gpu="none"; backend="cpu"; render_node=""
 fi
 
-# --- write hwaccel.env -------------------------------------------------------
-if [[ $backend == "cuda" ]]; then
-  env_body="QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda"
-elif [[ $backend == "vaapi" ]]; then
-  env_body="QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi
-QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1"
+# Remember what pure auto-detection decided, so --status can show it side by
+# side with the effective (possibly overridden) backend.
+auto_backend="$backend"
+
+# --- USER OVERRIDE (escape hatch) ---------------------------------------------
+# If the user has a config file, it wins over auto-detection: its env lines are
+# used verbatim (a file with no env lines forces CPU decode). This lets the
+# user fix a wrong auto-detection without touching the plugin.
+override_active=false
+override_env_body=""
+if [[ -f $OVERRIDE_FILE ]]; then
+  override_active=true
+  override_env_body="$(grep -vE '^[[:space:]]*(#|$)' "$OVERRIDE_FILE" || true)"
+  if [[ -n $override_env_body ]]; then
+    env_body="$override_env_body"
+    # Derive the effective backend label from the decoding-device-types line.
+    _dt="$(grep -E '^QT_FFMPEG_DECODING_HW_DEVICE_TYPES=' <<<"$override_env_body" | head -1 || true)"
+    if   [[ $_dt == *cuda* ]];  then backend="cuda"
+    elif [[ $_dt == *vaapi* ]]; then backend="vaapi"
+    else backend="cpu"; fi
+    echo "video-hwaccel: using user override ($OVERRIDE_FILE); auto-detection bypassed."
+  else
+    # Override file present but empty of env lines -> force CPU.
+    env_body="# user override forced CPU decode (no env vars)"
+    backend="cpu"
+    echo "video-hwaccel: user override forces CPU decode (no env vars set)."
+  fi
 else
-  env_body="# no GPU hwaccel detected -> CPU decode (Qt default)"
+  # No override: use the auto-detected env.
+  if [[ $backend == "cuda" ]]; then
+    env_body="QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda"
+  elif [[ $backend == "vaapi" ]]; then
+    env_body="QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi
+QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1"
+  else
+    env_body="# no GPU hwaccel detected -> CPU decode (Qt default)"
+  fi
 fi
+
+# --- write hwaccel.env -------------------------------------------------------
 mkdir -p "$PLUGIN_ROOT"
 printf '%s\n' "$env_body" > "$ENV_FILE"
 
@@ -187,6 +234,11 @@ mkdir -p "$(dirname "$LOG_FILE")"
   echo "  backend:     ${backend}"
   echo "  gpu family:  ${gpu}"
   echo "  render node: ${render_node:-n/a}"
+  if [[ $override_active == true ]]; then
+    echo "  override:    YES (user config: ${OVERRIDE_FILE})"
+  else
+    echo "  override:    no (auto-detection)"
+  fi
   echo "  env file:    ${ENV_FILE}"
   echo "  env vars:"
   sed 's/^/      /' <<<"$env_body"
@@ -204,9 +256,17 @@ mkdir -p "$(dirname "$LOG_FILE")"
 
 # --- apply mode: systemd-user drop-in on the WM session template --------------
 apply_dropin() {
-  # Only meaningful when we actually have something to force.
+  # CPU decode (no hwaccel, or a user override that set no env vars) -> remove
+  # any existing drop-in so the session runs on Qt's clean CPU default.
   if [[ $backend == "cpu" ]]; then
-    echo "video-hwaccel: no GPU hwaccel detected; nothing to apply (CPU decode)."
+    if [[ -f $DROPIN_FILE ]]; then
+      rm -f "$DROPIN_FILE"
+      rmdir --ignore-fail-on-non-empty "$DROPIN_DIR" 2>/dev/null || true
+      systemctl --user daemon-reload
+      echo "video-hwaccel: CPU decode active; removed drop-in (no env injected)."
+    else
+      echo "video-hwaccel: CPU decode active; nothing to apply (no drop-in)."
+    fi
     return 0
   fi
   local wm_unit
@@ -234,8 +294,102 @@ apply_dropin() {
   echo "video-hwaccel: current session is unaffected (it already has its env)."
 }
 
-if [[ ${1:-} == "--apply" ]]; then
-  apply_dropin
-fi
+# --- user-control helpers -----------------------------------------------------
+set_backend() {
+  # Force a backend by writing the user override file, then apply.
+  local b="${1:-}"
+  case "$b" in
+    cuda|vaapi|cpu) ;;
+    *) echo "video-hwaccel: --set-backend expects cuda | vaapi | cpu (got: $b)"; return 2 ;;
+  esac
+  mkdir -p "$(dirname "$OVERRIDE_FILE")"
+  {
+    echo "# User override for video-background GPU acceleration."
+    echo "# Managed by: video-hwaccel.sh --set-backend ${b}"
+    echo "# Edit freely (KEY=VALUE lines are injected into the session). Remove"
+    echo "# this file (or run: video-hwaccel.sh --auto) to re-enable auto-detection."
+    if [[ $b == "cuda" ]]; then
+      echo "QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda"
+    elif [[ $b == "vaapi" ]]; then
+      echo "QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi"
+      echo "QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1"
+    else
+      # cpu: no env lines -> Qt's CPU default.
+      echo "# (no env vars -> CPU decode)"
+    fi
+  } > "$OVERRIDE_FILE"
+  echo "video-hwaccel: override written to $OVERRIDE_FILE (backend=${b})"
+}
+
+show_status() {
+  echo "=== video-hwaccel status ==="
+  echo "  override file: ${OVERRIDE_FILE}"
+  if [[ -f $OVERRIDE_FILE ]]; then
+    echo "    exists:  YES (auto-detection BYPASSED)"
+    sed 's/^/    |     /' "$OVERRIDE_FILE"
+  else
+    echo "    exists:  no (auto-detection active)"
+  fi
+  echo "  auto-detected backend: ${auto_backend}"
+  if [[ $override_active == true ]]; then
+    echo "  effective backend:     ${backend} (USER OVERRIDE)"
+  else
+    echo "  effective backend:     ${backend} (auto)"
+  fi
+  echo "  env file:              ${ENV_FILE}"
+  if [[ -f $ENV_FILE ]]; then sed 's/^/    |     /' "$ENV_FILE"; fi
+  echo "  drop-in:               ${DROPIN_FILE}"
+  if [[ -f $DROPIN_FILE ]]; then
+    echo "    exists:  YES (session env will be set at next session start)"
+  else
+    echo "    exists:  no (session runs on Qt default)"
+  fi
+}
+
+# --- dispatch -----------------------------------------------------------------
+case "${1:-}" in
+  --apply)
+    apply_dropin
+    ;;
+  --set-backend)
+    set_backend "${2:-}"
+    # Re-resolve (detection already ran above; override is now in place).
+    if [[ -f $OVERRIDE_FILE ]]; then
+      override_active=true
+      override_env_body="$(grep -vE '^[[:space:]]*(#|$)' "$OVERRIDE_FILE" || true)"
+      if [[ -n $override_env_body ]]; then
+        env_body="$override_env_body"
+        _dt="$(grep -E '^QT_FFMPEG_DECODING_HW_DEVICE_TYPES=' <<<"$override_env_body" | head -1 || true)"
+        if   [[ $_dt == *cuda* ]];  then backend="cuda"
+        elif [[ $_dt == *vaapi* ]]; then backend="vaapi"
+        else backend="cpu"; fi
+      else
+        env_body="# user override forced CPU decode (no env vars)"; backend="cpu"
+      fi
+      printf '%s\n' "$env_body" > "$ENV_FILE"
+    fi
+    apply_dropin
+    ;;
+  --auto)
+    if [[ -f $OVERRIDE_FILE ]]; then
+      rm -f "$OVERRIDE_FILE"
+      echo "video-hwaccel: removed override ($OVERRIDE_FILE); re-enabling auto-detection."
+      override_active=false
+    else
+      echo "video-hwaccel: no override present; auto-detection already active."
+    fi
+    apply_dropin
+    ;;
+  --status)
+    show_status
+    ;;
+  "")
+    : # detection-only (env + log already written above)
+    ;;
+  *)
+    echo "usage: video-hwaccel.sh [--apply | --status | --set-backend {cuda|vaapi|cpu} | --auto]"
+    exit 2
+    ;;
+esac
 
 exit 0

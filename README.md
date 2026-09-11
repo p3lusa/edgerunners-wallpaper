@@ -253,7 +253,17 @@ The video is decoded by Qt 6 Multimedia's FFmpeg backend (the `MediaPlayer` in `
 
 **Hybrid iGPU + dGPU.** Both chips are listed in `hwaccel.log` and the non-Intel (dedicated) node is preferred. Note: the Qt FFmpeg backend cannot be pinned to a specific render node (no such env var), so on a hybrid the VAAPI decode uses the session's default node — still a real hardware decode, just not guaranteed to be the dGPU. On NVIDIA this is a non-issue (`cuda` always targets the dGPU).
 
-**Manual control.** Run `video-hwaccel.sh` (detection + logs only) or `video-hwaccel.sh --apply` (detection + drop-in) from the plugin's `bin/` directory to re-detect after a hardware change. To check it's decoding on the GPU: with a video wallpaper active, `ls -l /proc/$(pgrep -x quickshell | head -1)/fd | grep -c renderD` should be higher than the 3 file descriptors it opens for compositing alone, and `quickshell`'s CPU usage should be minimal.
+**Manual control & user override (fixing a wrong auto-detection).** The plugin never fights a deliberate choice. If the auto-detection picked the wrong backend, you can override it two ways:
+
+- **CLI:** from the plugin's `bin/` directory
+  - `video-hwaccel.sh --set-backend {cuda|vaapi|cpu}` — force a backend (`cpu` disables hardware acceleration entirely). This writes a user override file, applies it, and is what you want if the auto-config guessed wrong.
+  - `video-hwaccel.sh --auto` — remove the override and go back to auto-detection.
+  - `video-hwaccel.sh --status` — show what's effective (auto vs override, backend, env vars, drop-in state).
+- **By hand:** edit (or create) `~/.config/omarchy/video-hwaccel.conf` and put any `KEY=VALUE` lines in it — e.g. `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi`. If that file exists, its env lines **replace** the auto-detected ones verbatim, so you have full control. A file with no env lines forces CPU decode. Delete the file (or run `--auto`) to re-enable auto-detection.
+
+The override file lives **outside the plugin directory** on purpose, so `omarchy plugin update` never clobbers it. The auto-config hooks (`video-add` on first clip, `post-update` after `omarchy update`) respect the override — they re-apply whatever you set, they don't silently reset it.
+
+To check it's decoding on the GPU: with a video wallpaper active, `ls -l /proc/$(pgrep -x quickshell | head -1)/fd | grep -c renderD` should be higher than the 3 file descriptors it opens for compositing alone, and `quickshell`'s CPU usage should be minimal.
 
 ## Known limitations
 
