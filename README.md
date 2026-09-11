@@ -230,6 +230,31 @@ The plugin resolves the active theme's `videos/*.mp4` files on every background/
 
 The background layer can occasionally end up with a stale (uncommitted) surface buffer after a shell restart or a long time parked behind the lock screen, which would leave a flat desktop. As a safeguard, at startup and on every unlock the plugin forces an invisible re-render (the reveal transition runs with the same image on both sides, so nothing changes visually), which re-commits the surface if it was stale — the wallpaper always shows up.
 
+## GPU acceleration
+
+The video is decoded by Qt 6 Multimedia's FFmpeg backend (the `MediaPlayer` in `Background.qml`), so hardware acceleration is a **session-environment** concern, not a per-script flag. The plugin detects your GPU(s) and injects the right `QT_FFMPEG_*` variables into the compositor session so the decode runs on the GPU instead of the CPU.
+
+**How it works.** `bin/video-hwaccel.sh` enumerates **every** display GPU (integrated and dedicated, via `lspci`) and maps each `/dev/dri` render node to its physical chip, then writes:
+
+- `hwaccel.env` — the `QT_FFMPEG_*` variables for the detected backend
+- `hwaccel.log` — a readable record of every GPU, the chosen backend, and the render node (useful for debugging on other hardware)
+
+`video-hwaccel.sh --apply` turns that into a **systemd-user drop-in** on the `wayland-wm@.service` template, so the compositor session (and `quickshell` within it) inherits the variables. It is idempotent and survives `omarchy refresh` / `omarchy update` — unlike a manual `export` or a Hyprland `autostart.lua` line (which `omarchy refresh hyprland` clobbers).
+
+**Backend by vendor** (short, per-vendor list; Qt falls back to CPU if the backend can't handle the stream):
+
+| GPU | Backend | Env injected |
+|---|---|---|
+| NVIDIA (dedicated) | `cuda` (NVDEC) | `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=cuda` |
+| AMD (iGPU or dGPU) / Intel iGPU | `vaapi` | `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi` + `QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1` |
+| none usable | CPU (Qt default) | *(none — comment only; never breaks the wallpaper)* |
+
+**Auto-configured, no action needed.** The detection + apply runs automatically when you add your first clip (`video-add`) and on every `omarchy update` (the `post-update` hook). The variables take effect at the next session start (log out/in, or `systemctl --user restart wayland-wm@.service`); the running session is left untouched.
+
+**Hybrid iGPU + dGPU.** Both chips are listed in `hwaccel.log` and the non-Intel (dedicated) node is preferred. Note: the Qt FFmpeg backend cannot be pinned to a specific render node (no such env var), so on a hybrid the VAAPI decode uses the session's default node — still a real hardware decode, just not guaranteed to be the dGPU. On NVIDIA this is a non-issue (`cuda` always targets the dGPU).
+
+**Manual control.** Run `video-hwaccel.sh` (detection + logs only) or `video-hwaccel.sh --apply` (detection + drop-in) from the plugin's `bin/` directory to re-detect after a hardware change. To check it's decoding on the GPU: with a video wallpaper active, `ls -l /proc/$(pgrep -x quickshell | head -1)/fd | grep -c renderD` should be higher than the 3 file descriptors it opens for compositing alone, and `quickshell`'s CPU usage should be minimal.
+
 ## Known limitations
 
 - No crossfade between clips (the previous frame stays visible for a few hundred ms while the next clip's first frame decodes).
