@@ -206,12 +206,14 @@ render_poster() { # <name>
     local out=""
     case $IMG_PROTO in
       kitty)
-        # downscale with ffmpeg (always present) → lossy PNG → kitty sequence
+        # downscale with ffmpeg (always present) -> lossy PNG -> kitty sequence.
+        # Spec minimal form (kitty graphics protocol): a=T (transmit), f=100
+        # (PNG), m=0 (final chunk). One chunk is fine for a small thumbnail.
         local tmp="$SESSION/thumb.png"
         if ffmpeg -v error -y -i "$p" -vf "scale=220:-2" "$tmp" 2>/dev/null; then
           local b64
           b64=$(base64 -w0 "$tmp")
-          printf -v out '\033_Ga=100;t=0;q=100;m=0;f=100;w=220 %s\033\\' "$b64"
+          printf -v out '\033_Ga=T,f=100,m=0;%s\033\\' "$b64"
         fi
         ;;
       sixel)
