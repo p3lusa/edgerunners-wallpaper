@@ -249,19 +249,53 @@ The video is decoded by Qt 6 Multimedia's FFmpeg backend (the `MediaPlayer` in `
 | AMD (iGPU or dGPU) / Intel iGPU | `vaapi` | `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi` + `QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1` |
 | none usable | CPU (Qt default) | *(none — comment only; never breaks the wallpaper)* |
 
-**Auto-configured, no action needed.** The detection + apply runs automatically when you add your first clip (`video-add`) and on every `omarchy update` (the `post-update` hook). The variables take effect at the next session start (log out/in, or `systemctl --user restart wayland-wm@.service`); the running session is left untouched.
+**Auto-configuration (no action needed).** The backend is chosen automatically and applied for you at two points:
 
-**Hybrid iGPU + dGPU.** Both chips are listed in `hwaccel.log` and the non-Intel (dedicated) node is preferred. Note: the Qt FFmpeg backend cannot be pinned to a specific render node (no such env var), so on a hybrid the VAAPI decode uses the session's default node — still a real hardware decode, just not guaranteed to be the dGPU. On NVIDIA this is a non-issue (`cuda` always targets the dGPU).
+- **First time you add a clip** (`video-add.sh`) — the plugin detects your GPU(s) and applies the result.
+- **After every `omarchy update`** — the `post-update` hook re-runs detection + apply, so the config tracks any hardware change.
 
-**Manual control & user override (fixing a wrong auto-detection).** The plugin never fights a deliberate choice. If the auto-detection picked the wrong backend, you can override it two ways:
+Both run `video-hwaccel.sh --apply`, which writes the `hwaccel.env` + `hwaccel.log` and (re)creates the systemd drop-in. It is idempotent and **respects any override you've set** (see below) — it never silently resets a deliberate choice. The variables take effect at the **next session start** (log out/in, or `systemctl --user restart wayland-wm@.service`); the currently running session is left untouched.
 
-- **CLI:** from the plugin's `bin/` directory
-  - `video-hwaccel.sh --set-backend {cuda|vaapi|cpu}` — force a backend (`cpu` disables hardware acceleration entirely). This writes a user override file, applies it, and is what you want if the auto-config guessed wrong.
-  - `video-hwaccel.sh --auto` — remove the override and go back to auto-detection.
-  - `video-hwaccel.sh --status` — show what's effective (auto vs override, backend, env vars, drop-in state).
-- **By hand:** edit (or create) `~/.config/omarchy/video-hwaccel.conf` and put any `KEY=VALUE` lines in it — e.g. `QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi`. If that file exists, its env lines **replace** the auto-detected ones verbatim, so you have full control. A file with no env lines forces CPU decode. Delete the file (or run `--auto`) to re-enable auto-detection.
+**How to change it (override the auto-config).** The effective config follows one rule: **a user override wins; otherwise auto-detection applies.** You can change the backend three ways:
 
-The override file lives **outside the plugin directory** on purpose, so `omarchy plugin update` never clobbers it. The auto-config hooks (`video-add` on first clip, `post-update` after `omarchy update`) respect the override — they re-apply whatever you set, they don't silently reset it.
+1. **Force a backend (CLI).** From the plugin's `bin/` directory:
+   ```bash
+   video-hwaccel.sh --set-backend vaapi     # or: cuda | cpu
+   ```
+   `--set-backend` writes the override file, applies it, and is the quickest fix when the auto-detection guessed wrong. Use `cpu` to **disable hardware acceleration entirely** (the drop-in is removed).
+
+2. **Edit the config by hand.** Create or edit `~/.config/omarchy/video-hwaccel.conf` and put any `KEY=VALUE` lines in it. When this file exists, its env lines **replace** the auto-detected ones verbatim — full manual control, e.g.:
+   ```bash
+   # ~/.config/omarchy/video-hwaccel.conf
+   QT_FFMPEG_DECODING_HW_DEVICE_TYPES=vaapi
+   QT_FFMPEG_HW_ALLOW_PROFILE_MISMATCH=1
+   ```
+   A file with **no** env lines forces CPU decode. Then re-apply with `video-hwaccel.sh --apply` (or just log out/in).
+
+3. **Go back to auto-detection.** Either delete the override file, or run:
+   ```bash
+   video-hwaccel.sh --auto
+   ```
+
+**Check the current state at any time:**
+   ```bash
+   video-hwaccel.sh --status
+   ```
+   It shows whether auto-detection or a user override is in effect, the effective backend, the exact env vars, and whether the session drop-in is present.
+
+**Examples**
+
+| Goal | Command |
+|---|---|
+| Auto-detection said `vaapi` but I want `cuda` | `video-hwaccel.sh --set-backend cuda` |
+| HW decode is misbehaving → fall back to CPU | `video-hwaccel.sh --set-backend cpu` |
+| I edited the conf by hand; apply it | `video-hwaccel.sh --apply` |
+| Undo any override, trust auto-detection again | `video-hwaccel.sh --auto` |
+| See what's currently in effect | `video-hwaccel.sh --status` |
+
+The override file lives **outside the plugin directory** (`~/.config/omarchy/`) on purpose, so `omarchy plugin update` never clobbers it.
+
+**Hybrid iGPU + dGPU.** Both chips are listed in `hwaccel.log` and the non-Intel (dedicated) node is preferred. Note: the Qt FFmpeg backend cannot be pinned to a specific render node (no such env var), so on a hybrid the VAAPI decode uses the session's default node — still a real hardware decode, just not guaranteed to be the dGPU. On NVIDIA this is a non-issue (`cuda` always targets the dGPU). If auto-detection picks the "wrong" node on your hybrid, force one explicitly with `--set-backend` or the override file.
 
 To check it's decoding on the GPU: with a video wallpaper active, `ls -l /proc/$(pgrep -x quickshell | head -1)/fd | grep -c renderD` should be higher than the 3 file descriptors it opens for compositing alone, and `quickshell`'s CPU usage should be minimal.
 
