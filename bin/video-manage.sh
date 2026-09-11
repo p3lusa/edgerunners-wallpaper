@@ -9,9 +9,9 @@
 #          palette via GUM_* env vars)
 #
 # Layout (variant A — "hero header"):
-#   ┌ ▸ AHORA SUENA · <clip that is playing now> ┐   (fzf --header)
-#   │  === LIBRERÍA (n)  <rich, aligned rows>     │   (fzf sections)
-#   │  === ACCIONES    add / remove / help        │
+#   ┌ ▸ NOW PLAYING · <clip that is playing now> ┐   (fzf --header)
+#   │  === LIBRARY (n)  <rich, aligned rows>      │   (fzf sections)
+#   │  === ACTIONS    add / remove / help         │
 #   ├ filter prompt ────────────────────────────────
 #   │ footer: key hints + last-action feedback    │   (fzf --footer)
 #   preview pane (right 1/3): poster thumbnail (kitty protocol, or
@@ -66,7 +66,7 @@ load_palette() {
 # Icons: Nerd Font codepoints when the system has a Nerd Font (Omarchy's
 # default), ASCII fallback otherwise.
 declare_icons() {
-  # no grep -q: pipefail + SIGPIPE haría fallar la condición
+  # no grep -q: pipefail + SIGPIPE would make the condition fail
   if command -v fc-list >/dev/null 2>&1 && [[ -n $(fc-list 2>/dev/null | grep -i nerd) ]]; then
     I_ADD=$'\uf067' I_RM=$'\uf1f8' I_HELP=$'\uf059' I_DOT=$'\uf111'
     I_FILM=$'\uf008'
@@ -269,11 +269,11 @@ export -f section_hdr
 build_list() {
   local name theme file kind n
   n=$(wc -l < "$SESSION/library.tsv")
-  section_hdr "LIBRERÍA ($n)"
+  section_hdr "LIBRARY ($n)"
   while IFS=$'	' read -r name theme file kind; do
     render_clip "$name" "$theme" "$file" "$kind"
   done < "$SESSION/library.tsv"
-  section_hdr "ACCIONES"
+  section_hdr "ACTIONS"
   printf '%s\n' "$(col "$ACC" "$I_ADD  ")$(col "$TXT" "Add a video")"
   printf '%s\n' "$(col "$MUT" "$I_RM   ")$(col "$TXT" "Remove a video")"
   printf '%s\n' "$(col "$MUT" "$I_HELP ")$(col "$TXT" "How to use")"
@@ -289,7 +289,7 @@ build_clips_only() {
 # hero header (fzf --header): the clip that is playing right now.
 build_hero() {
   local line1 line2
-  line1="$(col "$ACC" "▸ AHORA SUENA")"
+  line1="$(col "$ACC" "▸ NOW PLAYING")"
   if [[ -n $CUR_BASE && $CUR_BASE != "?" ]]; then
     local row meta
     row=$(grep -P "^\Q${CUR_BASE}\E\t" "$SESSION/library.tsv" 2>/dev/null | head -1) || true
